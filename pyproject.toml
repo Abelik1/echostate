@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echostate"
+version = "0.1.0"
+description = "Echo State Network implementation using PyTorch"
+authors = [{name = "Alexander Belik", email = "abelik1@outlook.com"}]
+license = {text = ""}
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.23",
+    "matplotlib>=3.7"
+]
+
+[tool.setuptools]
+packages = ["echostate"]
