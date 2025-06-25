@@ -1,4 +1,5 @@
 import torch
+import pytest
 from echostate.reservoir import Reservoir
 
 def test_spectral_radius_scaling():

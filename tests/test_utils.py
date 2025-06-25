@@ -1,4 +1,5 @@
 import torch
+import pytest
 from echostate.utils import compute_spectral_radius, mean_absolute_error, mean_squared_error
 
 def test_compute_spectral_radius_identity():
