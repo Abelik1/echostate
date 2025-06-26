@@ -1,6 +1,6 @@
 from qutip import Qobj, basis, tensor, sigmax, sigmay, sigmaz, qeye, expect
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
 
 class HeisenbergChain:
     """
@@ -85,6 +85,7 @@ class HeisenbergChain:
                 rz = rho.ptrace(q)
                 data.append((q, t, expect(sigmaz(), rz)))
         arr_data = np.array(data)[:size]
+        # print(arr_data) #TODO REMOVE
         x, y, c = arr_data[:,0], arr_data[:,1], arr_data[:,2]
         plt.figure(figsize=(self.N, len(arr_data)*0.15+2))
         sc = plt.scatter(x, y, c=c, cmap='bwr', vmin=-1, vmax=1,
@@ -95,3 +96,4 @@ class HeisenbergChain:
         plt.title('Spin Evolution')
         plt.grid(which='both', ls='--', lw=0.5)
         plt.tight_layout()
+        
