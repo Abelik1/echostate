@@ -101,20 +101,24 @@ class HeisenbergChain:
 if __name__ == '__main__': 
     import pickle
     N = 5
-    dt = 0.01
-    qubit = 0
     T = 1000
-    dt_list = np.logspace(-5,-1, 5)
+    qubit = 0
+    dt_list = np.logspace(-2, -1, 4)[:2]
     seed = 31
+    target_points = 10_000
+    
+    all_z = []
+    all_times = []
     
     plt.figure()
     for dt in dt_list:
         steps = int(T / dt)
-        print("dt: ",dt)
+        print("dt: ", dt)
         np.random.seed(seed)
-        chain = HeisenbergChain(N, dt = dt)
-        name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)
+        chain = HeisenbergChain(N, dt=dt)
+        name = f"StpsNA_Qbts{N}_dt{dt}".replace(".", "_", 1)
         histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
+        
         try:
             with open(histories_path, 'rb') as f:
                 chain.history = pickle.load(f)
@@ -122,14 +126,34 @@ if __name__ == '__main__':
             chain.evolve(steps=steps)
             with open(histories_path, 'wb') as f:
                 pickle.dump(chain.history, f)
-                
-        # chain = HeisenbergChain(N,dt)
-        # chain.evolve(steps = steps)
-        z_test = [float(expect(sigmaz(),
-                                    Qobj(rho, dims=chain.dims).ptrace(qubit)))
-                        for rho in chain.history]
-        plt.plot(range(0, T, dt), z_test[1], label = f"{dt}")
+        
+        # compute z_test
+        z_test = [float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
+                  for rho in chain.history]
+        step = max(1, len(z_test) // target_points)
+        times = np.linspace(0, T, len(z_test))
+        
+        # store for diff plot
+        all_z.append(np.array(z_test)[::step])
+        all_times.append(times[::step])
+        
+        # plot normal z
+        plt.plot(times[:500:step], z_test[:500:step], label=f"{dt}")
     
     plt.legend()
+    plt.title("⟨σ_z⟩ vs time for different dt")
+    # plt.show()
+    
+    # --- plot difference between neighboring dt ---
+    plt.figure()
+    for i in range(0,2):
+        diff = np.abs(all_z[i]-all_z[i+1])
+        plt.plot(all_times[:500:step], diff)
+    
+    plt.legend()
+    plt.title("Difference between ⟨σ_z⟩ for neighboring dt")
+    plt.xlabel("Time")
+    plt.ylabel("Abs difference in ⟨σ_z⟩")
     plt.show()
+
     
