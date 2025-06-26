@@ -11,7 +11,7 @@ from tqdm import tqdm
 from echostate import ESN  # <-- our new ESN module
 from .Heisenberg_sim import HeisenbergChain
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
 
 
 class ESNPredictor:
@@ -143,11 +143,11 @@ class ESNPredictor:
 
 if __name__ == '__main__':
     # Example usage
-    steps = 5000
+    steps = 10000
     N = 3
     dt = 0.01
     qubit = 1
-    washout = 500
+    washout = 200
 
     # simulate once or load from pickle
     name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)

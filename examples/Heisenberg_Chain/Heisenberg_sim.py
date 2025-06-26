@@ -96,4 +96,37 @@ class HeisenbergChain:
         plt.title('Spin Evolution')
         plt.grid(which='both', ls='--', lw=0.5)
         plt.tight_layout()
-        
+    
+    
+if __name__ == '__main__': 
+    import pickle
+    N = 5
+    dt = 0.01
+    qubit = 0
+    steps = 100_000
+    dt_list = np.logspace(-5,4, 5)
+    seed = 31
+    np.random.seed(seed)
+    
+    
+    plt.figure()
+    for dt in dt_list:
+        chain = HeisenbergChain(N,dt)
+        name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)
+        histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
+        try:
+            with open(histories_path, 'rb') as f:
+                chain.history = pickle.load(f)
+        except FileNotFoundError:
+            chain.evolve(steps=steps)
+            with open(histories_path, 'wb') as f:
+                pickle.dump(chain.history, f)
+                
+        # chain = HeisenbergChain(N,dt)
+        # chain.evolve(steps = steps)
+        z_test = [float(expect(sigmaz(),
+                                    Qobj(rho, dims=chain.dims).ptrace(qubit)))
+                        for rho in chain.history]
+        plt.plot(z_test, label = f"{dt}")
+
+    plt.show()
