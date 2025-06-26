@@ -103,15 +103,16 @@ if __name__ == '__main__':
     N = 5
     dt = 0.01
     qubit = 0
-    steps = 100_000
-    dt_list = np.logspace(-5,4, 5)
+    T = 1000
+    dt_list = np.logspace(-5,-1, 5)
     seed = 31
-    np.random.seed(seed)
-    
     
     plt.figure()
     for dt in dt_list:
-        chain = HeisenbergChain(N,dt)
+        steps = int(T / dt)
+        print("dt: ",dt)
+        np.random.seed(seed)
+        chain = HeisenbergChain(N, dt = dt)
         name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)
         histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
         try:
@@ -127,6 +128,8 @@ if __name__ == '__main__':
         z_test = [float(expect(sigmaz(),
                                     Qobj(rho, dims=chain.dims).ptrace(qubit)))
                         for rho in chain.history]
-        plt.plot(z_test, label = f"{dt}")
-
+        plt.plot(range(0, T, dt), z_test[1], label = f"{dt}")
+    
+    plt.legend()
     plt.show()
+    

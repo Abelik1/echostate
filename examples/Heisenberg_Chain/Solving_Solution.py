@@ -69,7 +69,7 @@ class ESNPredictor:
         # Pre-generate quantum histories if needed
         self.histories = []
         for _ in range(training_depth):
-            chain = HeisenbergChain(N, dt)
+            chain = HeisenbergChain(N, dt=dt)
             chain.evolve(steps=steps)
             self.histories.append(chain.history)
         print(f"Collected {training_depth} simulation histories.")
@@ -153,7 +153,7 @@ if __name__ == '__main__':
     name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)
     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
     model_path = f'./examples/Heisenberg_Chain/cache/trainedmodel_{name}.pt'
-    chain = HeisenbergChain(N, dt)
+    chain = HeisenbergChain(N, dt=dt)
     try:
         with open(histories_path, 'rb') as f:
             chain.history = pickle.load(f)
