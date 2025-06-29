@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from echostate import ESN  # <-- our new ESN module
 from .Heisenberg_sim import HeisenbergChain
+from echostate.utils import mean_absolute_error
 
 device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
 
@@ -83,7 +84,7 @@ class ESNPredictor:
 
         for run_hist in self.histories:
             # iterate qubits if qubit==0 else just the specified qubit
-            qubits = range(self.N) if self.qubit == 0 else [self.qubit]
+            qubits = range(self.N) if self.qubit == -1 else [self.qubit]
             for q in qubits:
                 # extract ⟨σ_z⟩ time series
                 z_series = [float(expect(sigmaz(),
@@ -119,12 +120,12 @@ class ESNPredictor:
         z_test = [float(expect(sigmaz(),
                               Qobj(rho, dims=self.dims).ptrace(self.qubit)))
                   for rho in self.test_history]
-        print(z_test[:10])
+        # print(z_test[:10]) #TODO REMOVE
         X_test = torch.tensor(z_test[:-1], dtype=torch.float32).unsqueeze(-1).to(device)
         preds = self.esn.predict([X_test])[0].cpu().numpy().flatten()
 
         # true targets
-        true = z_test[1 + self.washout:]  # align with washout shift
+        true = z_test[self.washout + 1 : len(preds) + self.washout + 1]
 
         # plot
         plt.figure(figsize=(8,4))
@@ -133,7 +134,9 @@ class ESNPredictor:
         plt.plot(true,  label='true ⟨σ_z⟩')
         plt.legend()
         plt.title('ESN Prediction of Single‐Qubit Dynamics')
-        plt.savefig(re.sub(r"(Qbts)", r"\1({})".format(qubit+1), f"./examples/Heisenberg_Chain/cache/Errors_{name}.png"))
+        plt.savefig(re.sub(r"(Qbts)", r"\1({})".format(self.qubit+1), f"./examples/Heisenberg_Chain/cache/Errors_{name}.png"))
+        mae = mean_absolute_error(torch.tensor(preds), torch.tensor(true))
+        print(f"MAE on test: {mae.item():.4f}")
         plt.show()
 
     def debug(self):
@@ -143,16 +146,19 @@ class ESNPredictor:
 
 if __name__ == '__main__':
     # Example usage
-    steps = 10000
+    T = 1_000
+    # steps = 10_000
     N = 3
-    dt = 0.01
-    qubit = 1
+    dt = 0.25
+    steps = int(T/dt)
+    qubit = 0
     washout = 200
 
     # simulate once or load from pickle
     name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)
     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
     model_path = f'./examples/Heisenberg_Chain/cache/trainedmodel_{name}.pt'
+    
     chain = HeisenbergChain(N, dt=dt)
     try:
         with open(histories_path, 'rb') as f:
@@ -162,7 +168,7 @@ if __name__ == '__main__':
         with open(histories_path, 'wb') as f:
             pickle.dump(chain.history, f)
             
-    chain.plot_spin_grid(None)
+    chain.plot_spin_grid(400)
     # print(chain.history[1][:10])
     
     predictor = ESNPredictor(
@@ -172,16 +178,18 @@ if __name__ == '__main__':
         history_arrays=chain.history,
         dims=chain.dims,
         qubit=qubit,
-        reservoir_size=208,
-        spectral_radius=0.4,
-        input_scaling=4.8,
-        ridge_param=3e-5,
-        leak_rate=0.25,
-        sparsity=0.1,
+        
+        reservoir_size=333,
+        spectral_radius=0.6730,
         feedback=1,
+        input_scaling=2.3607,
+        ridge_param=1e-4,
+        leak_rate=0.57786,
+        sparsity=0.35584,
+        
         washout=washout,
-        batch_size=1,
-        training_depth=1,
+        batch_size=4,
+        training_depth=4,
         model_path = model_path
     )
 
@@ -192,3 +200,21 @@ if __name__ == '__main__':
     predictor.debug()
     predictor.predict_and_plot()
     
+    # ------Prepare dataset
+    # input_list, target_list = predictor._build_dataset()
+
+    # # Run Optuna
+    # study = ESN.tune(input_list, target_list, n_trials=1000, direction="minimize",
+    #                 reservoir_limit = [50,1000],
+    #                 spectral_radius_limit = [0.1, 1.4],
+    #                 feedback_limit = [0, 5],
+    #                 input_scaling_limit = [0.05, 5.0],
+    #                 ridge_param_limit = [1e-7, 1.0],
+    #                 leak_rate_limit = [0.1, 1.0],
+    #                 sparsity_limit = [0.05, 1.0],
+    #                 )
+
+    # # Print best params
+    # print("Best hyperparameters:", study.best_params)
+    # print("Best MAE:", study.best_value)
+        

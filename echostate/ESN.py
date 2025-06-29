@@ -147,20 +147,31 @@ class ESN(torch.nn.Module):
         return predictions
 
     @staticmethod
-    def tune(input_list, target_list, n_trials=50, direction="minimize", **study_kwargs):
+    def tune(input_list,
+            target_list,
+            n_trials=50,
+            direction="minimize",
+            reservoir_limit = [50,1000],
+            spectral_radius_limit = [0.1, 1.4],
+            feedback_limit = [0, 5],
+            input_scaling_limit = [0.05, 5.0],
+            ridge_param_limit = [1e-7, 1.0],
+            leak_rate_limit = [0.1, 1.0],
+            sparsity_limit = [0.05, 1.0],
+            **study_kwargs):
         import optuna
         """
         Hyperparameter tuning using Optuna.
         Returns the Optuna Study object.
         """
         def objective(trial):
-            reservoir_size = trial.suggest_int("reservoir_size", 50, 1000)
-            spectral_radius = trial.suggest_float("spectral_radius", 0.1, 1.4)
-            feedback = trial.suggest_int("feedback", 0, 5)
-            input_scaling = trial.suggest_float("input_scaling", 0.05, 5.0)
-            ridge_param = trial.suggest_float("ridge_param", 1e-7, 1.0, log=True)
-            leak_rate = trial.suggest_float("leak_rate", 0.1, 1.0)
-            sparsity = trial.suggest_float("sparsity", 0.05, 1.0)
+            reservoir_size = trial.suggest_int("reservoir_size", reservoir_limit[0], reservoir_limit[1])
+            spectral_radius = trial.suggest_float("spectral_radius", spectral_radius_limit[0],spectral_radius_limit[1])
+            feedback = trial.suggest_int("feedback", feedback_limit[0], feedback_limit[1])
+            input_scaling = trial.suggest_float("input_scaling", input_scaling_limit[0], input_scaling_limit[1])
+            ridge_param = trial.suggest_float("ridge_param", ridge_param_limit[0], ridge_param_limit[1], log=True)
+            leak_rate = trial.suggest_float("leak_rate", leak_rate_limit[0], leak_rate_limit[1])
+            sparsity = trial.suggest_float("sparsity", sparsity_limit[0], sparsity_limit[1])
 
             model = ESN(base_input_dim=input_list[0].shape[1],
                         reservoir_size=reservoir_size,
