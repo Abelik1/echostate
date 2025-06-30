@@ -20,7 +20,7 @@ class HeisenbergChain:
         # initial random pure state
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N))
         vec /= np.linalg.norm(vec)
-        print("Vec: ", vec[:3])
+        print("Vec: ", vec[:self.N])
         psi = Qobj(vec, dims=[[2]*self.N, [1]*self.N])
         rho0 = psi * psi.dag()
 
@@ -99,83 +99,86 @@ class HeisenbergChain:
     
     
 if __name__ == '__main__': 
+    from scipy.interpolate import interp1d
     import pickle
-    
     N = 5
     T = 1000
     qubit = 0
-    dt_list = np.arange(0.01, 0.31, 0.01)
+    dt_list = np.arange(0.01, 1.01, 0.01) 
     seed = 31
     target_points = 10_000
-    
+
     all_z = []
     all_times = []
-    num = 0
-    plt.figure()
+    errors = []
+
+    # Load or generate all trajectories
+    # for dt in dt_list:
+    #     steps = int(T / dt)
+    #     print(f"Processing dt: {dt}")
+    #     np.random.seed(seed)
+    #     chain = HeisenbergChain(N, dt=dt)
+    #     name = f"Qbts{N}_dt{round(dt, 5)}".replace(".", "_", 1)
+    #     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
+
+    #     # try:
+    #     #     with open(histories_path, 'rb') as f:
+    #     #         chain.history = pickle.load(f)
+    #     # except FileNotFoundError:
+    #     chain.evolve(steps=steps)
+    #     # with open(histories_path, 'wb') as f:
+    #     #     pickle.dump(chain.history, f)
+
+    #     z_vals = np.array([
+    #         float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
+    #         for rho in chain.history
+    #     ])
+    #     times = np.arange(len(z_vals)) * dt
+    #     all_z.append(z_vals)
+    #     all_times.append(times)
+    
+    histories_path_time = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_alltimes.pkl'  
+    histories_path_z = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_allz.pkl'  
+    # with open(histories_path_time, 'wb') as f:
+    #     pickle.dump(all_times, f)
+    # with open(histories_path_z, 'wb') as f:
+    #     pickle.dump(all_z, f)
+        
+    with open(histories_path_time, 'rb') as f:
+        all_times = pickle.load(f)
+    with open(histories_path_z, 'rb') as f:
+        all_z = pickle.load(f)
+    
             
-    plt.xlabel("Time")
-    plt.ylabel("⟨σ_z⟩")
-    plt.title("⟨σ_z⟩ vs time for different dt")
+    # Use smallest dt as reference
+    ref_z = all_z[0]
+    ref_t = all_times[0]
+
+    for i, (t_arr, z_arr) in enumerate(zip(all_times, all_z)):
+        if i == 0:
+            errors.append(0.0)  # zero error for reference
+            continue
+
+        # Interpolate current trajectory to reference times
+        f = interp1d(t_arr, z_arr, bounds_error=False, fill_value="extrapolate")
+        z_interp = f(ref_t)
+
+        mae = np.mean(np.abs(z_interp - ref_z))
+        errors.append(mae)
+
+    # Plot error vs dt
+    plt.figure()
+    plt.plot(dt_list, errors, marker='o')
+    plt.xlabel("dt")
+    plt.ylabel("Mean Absolute Error vs smallest dt")
+    plt.title("Fidelity loss with increasing dt")
+    plt.grid(True)
     plt.tight_layout()
-    for dt in dt_list:
-        
-        steps = int(T / dt)
-        print("dt: ", dt)
-        np.random.seed(seed)
-        
-        chain = HeisenbergChain(N, dt=dt)
-        name = f"Qbts{N}_dt{round(dt,5)}".replace(".", "_", 1)
-        histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
-        
-        try:
-            with open(histories_path, 'rb') as f:
-                chain.history = pickle.load(f)
-        except FileNotFoundError:
-            chain.evolve(steps=steps)
-            with open(histories_path, 'wb') as f:
-                pickle.dump(chain.history, f)
-
-        # compute z_test
-        z_test = np.array([
-            float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
-            for rho in chain.history
-        ])
-
-        # sample approximately target_points from z_test
-        total_len = len(z_test)
-        sample_indices = np.linspace(0, total_len - 1, min(target_points, total_len), dtype=int)
-        sampled_z = z_test[sample_indices]
-        sampled_t = np.array(sample_indices) * dt
-
-        all_z.append(sampled_z)
-        all_times.append(sampled_t)
-        plt.plot(sampled_t, sampled_z, label=f"dt = {dt:.3f}")
-        plt.legend()
-        num += 1
-        if (num % 4) == 0:
-            plt.figure()
-            plt.plot(sampled_t, sampled_z, label=f"dt = {dt:.3f}")
-            plt.xlabel("Time")
-            plt.ylabel("⟨σ_z⟩")
-            plt.title("⟨σ_z⟩ vs time for different dt")
-            plt.tight_layout()
-        
-        
-        
-
     
-    # plt.show()
-    
-    # --- plot difference between neighboring dt ---
-    # plt.figure()
-    # for i in range(0,2):
-    #     diff = np.abs(all_z[i]-all_z[i+1])
-    #     plt.plot(all_times[:500:step], diff)
-    
-    # plt.legend()
-    # plt.title("Difference between ⟨σ_z⟩ for neighboring dt")
-    # plt.xlabel("Time")
-    # plt.ylabel("Abs difference in ⟨σ_z⟩")
+    plt.figure()
+    plt.plot(all_times[0], all_z[0], label = f"Best {all_times[0][1]}")
+    plt.plot(all_times[80], all_z[80], label = f"Less {all_times[80][1]}")
+    plt.legend()
     plt.show()
 
     

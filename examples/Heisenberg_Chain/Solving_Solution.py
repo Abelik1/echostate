@@ -148,11 +148,30 @@ class ESNPredictor:
         self.esn.trainer.debug_covariance()
 
 
+def optuna():
+    input_list, target_list = predictor._build_dataset()
+
+    # ------------ Run Optuna
+    study = ESN.tune(input_list, target_list, n_trials=1000, direction="minimize",study_name = study_name, washout = washout, seed = seed,
+                    reservoir_limit = [50,1500],
+                    spectral_radius_limit = [0.1, 1.7],
+                    feedback_limit = [1, 4],
+                    input_scaling_limit = [0.05, 5.0],
+                    ridge_param_limit = [1e-7, 1.0],
+                    leak_rate_limit = [0.1, 1.0],
+                    sparsity_limit = [0.2, 0.6],
+                    )
+
+    # ----- Print best params
+    print("Best hyperparameters:", study.best_params)
+    print("Best MAE:", study.best_value)
+    
+
 if __name__ == '__main__':
     # Example usage
     T = 1_000
     # steps = 10_000
-    N = 3
+    N = 5
     dt = 0.25
     steps = int(T/dt)
     qubit = 0
@@ -204,29 +223,14 @@ if __name__ == '__main__':
         seed = seed,
     )
 
-    if not os.path.exists(model_path):
-        predictor.train()
-        torch.save(predictor.esn, model_path)
+    # if not os.path.exists(model_path):
+    #     predictor.train()
+    #     torch.save(predictor.esn, model_path)
         
-    predictor.debug()
-    predictor.predict_and_plot()
+    # predictor.debug()
+    # predictor.predict_and_plot()
     
     # ------Prepare dataset
     
-    # input_list, target_list = predictor._build_dataset()
-
-    # # ------------ Run Optuna
-    # study = ESN.tune(input_list, target_list, n_trials=1000, direction="minimize",study_name = study_name, washout =washout, seed =seed,
-    #                 reservoir_limit = [50,1500],
-    #                 spectral_radius_limit = [0.1, 1.7],
-    #                 feedback_limit = [1, 4],
-    #                 input_scaling_limit = [0.05, 5.0],
-    #                 ridge_param_limit = [1e-7, 1.0],
-    #                 leak_rate_limit = [0.1, 1.0],
-    #                 sparsity_limit = [0.2, 0.6],
-    #                 )
-
-    # # ----- Print best params
-    # print("Best hyperparameters:", study.best_params)
-    # print("Best MAE:", study.best_value)
+    optuna()
         
