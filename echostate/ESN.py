@@ -86,10 +86,15 @@ class ESN(torch.nn.Module):
                 x = self.reservoir.update(x, u, self.leak_rate)
                 if t >= self.washout:
                     states.append(x.clone())
+                    
+            states = torch.stack(states)  # Now it's a tensor
+            bias = torch.ones(states.size(0), 1, device=states.device)
+            states = torch.cat([states, bias], dim=1)
 
-            all_states.append(torch.stack(states))
+            all_states.append(states)  # No need to stack again
             all_targets.append(targets[self.washout:])
-
+        
+        
         X = torch.cat(all_states, dim=0)
         Y = torch.cat(all_targets, dim=0)
         self.W_out = self.trainer.fit(X, Y)
@@ -118,7 +123,8 @@ class ESN(torch.nn.Module):
             else:
                 u = u_base
             x = self.reservoir.update(x, u, self.leak_rate)
-            y = self.W_out @ x
+            xb = torch.cat([x, torch.tensor([1.0], device=x.device)])
+            y  = self.W_out @ xb
             prev_outputs.append(y)
             if t >= self.washout:
                 outputs.append(y)
@@ -151,6 +157,9 @@ class ESN(torch.nn.Module):
             target_list,
             n_trials=50,
             direction="minimize",
+            study_name = None,
+            washout=0,
+            seed = None,
             reservoir_limit = [50,1000],
             spectral_radius_limit = [0.1, 1.4],
             feedback_limit = [0, 5],
@@ -182,12 +191,16 @@ class ESN(torch.nn.Module):
                         input_scaling=input_scaling,
                         ridge_param=ridge_param,
                         leak_rate=leak_rate,
-                        washout=input_list[0].shape[0] - target_list[0].shape[0],
-                        batch_size=len(input_list))
+                        washout= washout,
+                        batch_size=len(input_list),
+                        seed = seed)
+                        
             model.fit(input_list, target_list)
             _, metrics = model.predict(input_list, target_list)
             return metrics['mae']
 
-        study = optuna.create_study(direction=direction)
+        study = optuna.create_study(direction=direction, study_name=study_name,
+                storage=f"sqlite:///examples/Heisenberg_Chain/trained_esns/{study_name}.db", #TODO REMOVE THE PATH
+                load_if_exists=True)
         study.optimize(objective, n_trials=n_trials, **study_kwargs)
         return study

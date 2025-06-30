@@ -104,21 +104,27 @@ if __name__ == '__main__':
     N = 5
     T = 1000
     qubit = 0
-    dt_list = np.logspace(-1, 0, 5)
+    dt_list = np.arange(0.01, 0.31, 0.01)
     seed = 31
     target_points = 10_000
     
     all_z = []
     all_times = []
-
+    num = 0
     plt.figure()
+            
+    plt.xlabel("Time")
+    plt.ylabel("⟨σ_z⟩")
+    plt.title("⟨σ_z⟩ vs time for different dt")
+    plt.tight_layout()
     for dt in dt_list:
+        
         steps = int(T / dt)
         print("dt: ", dt)
         np.random.seed(seed)
         
         chain = HeisenbergChain(N, dt=dt)
-        name = f"StpsNA_Qbts{N}_dt{dt}".replace(".", "_", 1)
+        name = f"Qbts{N}_dt{round(dt,5)}".replace(".", "_", 1)
         histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
         
         try:
@@ -143,14 +149,21 @@ if __name__ == '__main__':
 
         all_z.append(sampled_z)
         all_times.append(sampled_t)
-
         plt.plot(sampled_t, sampled_z, label=f"dt = {dt:.3f}")
+        plt.legend()
+        num += 1
+        if (num % 4) == 0:
+            plt.figure()
+            plt.plot(sampled_t, sampled_z, label=f"dt = {dt:.3f}")
+            plt.xlabel("Time")
+            plt.ylabel("⟨σ_z⟩")
+            plt.title("⟨σ_z⟩ vs time for different dt")
+            plt.tight_layout()
+        
+        
+        
 
-    plt.legend()
-    plt.xlabel("Time")
-    plt.ylabel("⟨σ_z⟩")
-    plt.title("⟨σ_z⟩ vs time for different dt")
-    plt.tight_layout()
+    
     # plt.show()
     
     # --- plot difference between neighboring dt ---

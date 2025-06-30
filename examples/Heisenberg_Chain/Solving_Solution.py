@@ -1,7 +1,7 @@
 import os
 import pickle
 import re
-
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from qutip import Qobj, sigmaz, expect
@@ -37,7 +37,8 @@ class ESNPredictor:
                  washout: int = 0,
                  batch_size: int = 1,
                  training_depth: int = 1,
-                 model_path = None,):
+                 model_path = None,
+                 seed = None,):
         self.steps = steps
         self.dt = dt
         self.N = N
@@ -61,7 +62,8 @@ class ESNPredictor:
                 input_scaling=input_scaling,
                 ridge_param=ridge_param,
                 washout=washout,
-                batch_size=batch_size
+                batch_size=batch_size,
+                seed = seed,
             ).to(device)
         else:
             self.esn = torch.load(model_path)
@@ -69,7 +71,9 @@ class ESNPredictor:
 
         # Pre-generate quantum histories if needed
         self.histories = []
+        np.random.seed(seed)
         for _ in range(training_depth):
+            
             chain = HeisenbergChain(N, dt=dt)
             chain.evolve(steps=steps)
             self.histories.append(chain.history)
@@ -153,13 +157,19 @@ if __name__ == '__main__':
     steps = int(T/dt)
     qubit = 0
     washout = 200
-
+    seed = None
+    training_depth = 6
+        
     # simulate once or load from pickle
-    name = f"Stps{int(steps/1000.0)}_Qbts{N}_dt{dt}".replace(".","_",1)
-    histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
-    model_path = f'./examples/Heisenberg_Chain/cache/trainedmodel_{name}.pt'
+    name = f"Seed{seed}_Qbts{N}_dt{dt}".replace(".","_",1)
+    study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
     
+    
+    histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
+    model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
+    np.random.seed(seed)
     chain = HeisenbergChain(N, dt=dt)
+    
     try:
         with open(histories_path, 'rb') as f:
             chain.history = pickle.load(f)
@@ -179,18 +189,19 @@ if __name__ == '__main__':
         dims=chain.dims,
         qubit=qubit,
         
-        reservoir_size=333,
-        spectral_radius=0.6730,
-        feedback=1,
-        input_scaling=2.3607,
-        ridge_param=1e-4,
-        leak_rate=0.57786,
-        sparsity=0.35584,
+        reservoir_size=747,
+        spectral_radius=0.5577,
+        feedback=2,
+        input_scaling=0.1341,
+        ridge_param=0.3755,
+        leak_rate=0.5122,
+        sparsity=0.44876,
         
         washout=washout,
-        batch_size=4,
-        training_depth=4,
-        model_path = model_path
+        batch_size=training_depth,
+        training_depth=training_depth,
+        model_path = model_path,
+        seed = seed,
     )
 
     if not os.path.exists(model_path):
@@ -201,20 +212,21 @@ if __name__ == '__main__':
     predictor.predict_and_plot()
     
     # ------Prepare dataset
+    
     # input_list, target_list = predictor._build_dataset()
 
-    # # Run Optuna
-    # study = ESN.tune(input_list, target_list, n_trials=1000, direction="minimize",
-    #                 reservoir_limit = [50,1000],
-    #                 spectral_radius_limit = [0.1, 1.4],
-    #                 feedback_limit = [0, 5],
+    # # ------------ Run Optuna
+    # study = ESN.tune(input_list, target_list, n_trials=1000, direction="minimize",study_name = study_name, washout =washout, seed =seed,
+    #                 reservoir_limit = [50,1500],
+    #                 spectral_radius_limit = [0.1, 1.7],
+    #                 feedback_limit = [1, 4],
     #                 input_scaling_limit = [0.05, 5.0],
     #                 ridge_param_limit = [1e-7, 1.0],
     #                 leak_rate_limit = [0.1, 1.0],
-    #                 sparsity_limit = [0.05, 1.0],
+    #                 sparsity_limit = [0.2, 0.6],
     #                 )
 
-    # # Print best params
+    # # ----- Print best params
     # print("Best hyperparameters:", study.best_params)
     # print("Best MAE:", study.best_value)
         

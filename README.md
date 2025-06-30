@@ -106,6 +106,9 @@ print(stats)
 
 
 
+Some plans
+Find the fidelity of dt for Heisenberg chain that retains information
 
+Train a ESN now, see if when you input a different dt can it track a higher dt level
 
 
