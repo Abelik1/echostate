@@ -148,23 +148,31 @@ class ESNPredictor:
         self.esn.trainer.debug_covariance()
 
 
-def optuna():
+def Heisen_tune():
+    from optuna.visualization import plot_optimization_history, plot_param_importances, plot_parallel_coordinate, plot_slice, plot_contour, plot_edf
+
     input_list, target_list = predictor._build_dataset()
 
     # ------------ Run Optuna
-    study = ESN.tune(input_list, target_list, n_trials=1000, direction="minimize",study_name = study_name, washout = washout, seed = seed,
-                    reservoir_limit = [50,1500],
+    study = ESN.tune(input_list, target_list, n_trials=0, direction="minimize",study_name = study_name, washout = washout, seed = seed,
+                    reservoir_limit = 1300,
                     spectral_radius_limit = [0.1, 1.7],
-                    feedback_limit = [1, 4],
+                    feedback_limit = 1,
                     input_scaling_limit = [0.05, 5.0],
-                    ridge_param_limit = [1e-7, 1.0],
+                    ridge_param_limit = [1e-7, 1e-2],
                     leak_rate_limit = [0.1, 1.0],
-                    sparsity_limit = [0.2, 0.6],
+                    # sparsity_limit = [0.2, 0.6],
                     )
-
+    plot_optimization_history(study).show()
+    plot_param_importances(study).show()
+    plot_parallel_coordinate(study).show()
+    plot_slice(study).show()
+    plot_contour(study).show()
+    plot_edf(study).show()
     # ----- Print best params
     print("Best hyperparameters:", study.best_params)
     print("Best MAE:", study.best_value)
+    
     
 
 if __name__ == '__main__':
@@ -223,14 +231,14 @@ if __name__ == '__main__':
         seed = seed,
     )
 
-    if not os.path.exists(model_path):
-        predictor.train()
-        torch.save(predictor.esn, model_path)
+    # if not os.path.exists(model_path):
+    #     predictor.train()
+    #     torch.save(predictor.esn, model_path)
         
-    predictor.debug()
-    predictor.predict_and_plot()
+    # predictor.debug()
+    # predictor.predict_and_plot()
     
     # ------Prepare dataset
     
-    # optuna()
+    Heisen_tune()
         

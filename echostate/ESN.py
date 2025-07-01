@@ -177,7 +177,7 @@ class ESN(torch.nn.Module):
             reservoir_size = trial.suggest_int("reservoir_size", *reservoir_limit) if reservoir_limit else 100
             spectral_radius = trial.suggest_float("spectral_radius", *spectral_radius_limit) if spectral_radius_limit else 0.9
             feedback = trial.suggest_int("feedback", *feedback_limit) if feedback_limit else 0
-            sparsity = trial.suggest_float("sparsity", *sparsity_limit) if sparsity_limit else 0.1
+            sparsity = trial.suggest_float("sparsity", *sparsity_limit) if sparsity_limit else 0.2
             leak_rate = trial.suggest_float("leak_rate", *leak_rate_limit) if leak_rate_limit else 1.0
             input_scaling = trial.suggest_float("input_scaling", *input_scaling_limit) if input_scaling_limit else 1.0
             bias_scaling = trial.suggest_float("bias_scaling", *bias_scaling_limit) if bias_scaling_limit else 0.2
@@ -207,7 +207,7 @@ class ESN(torch.nn.Module):
         study = optuna.create_study(
             direction=direction,
             study_name=study_name,
-            storage=f"sqlite:///{study_name}.db" if study_name else None,
+            storage=f"sqlite:///examples/Heisenberg_Chain/trained_esns/{study_name}.db" if study_name else None,
             load_if_exists=True
         )
         study.optimize(objective, n_trials=n_trials, **study_kwargs)
