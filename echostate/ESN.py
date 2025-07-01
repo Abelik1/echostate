@@ -154,34 +154,37 @@ class ESN(torch.nn.Module):
 
     @staticmethod
     def tune(input_list,
-            target_list,
-            n_trials=50,
-            direction="minimize",
-            study_name=None,
-            washout=0,
-            seed=None,
-            reservoir_limit=None,
-            spectral_radius_limit=None,
-            feedback_limit=None,
-            sparsity_limit=None,
-            leak_rate_limit=None,
-            input_scaling_limit=None,
-            bias_scaling_limit=None,
-            ridge_param_limit=None,
-            learning_algo="inv",
-            **study_kwargs):
+         target_list,
+         n_trials=50,
+         direction="minimize",
+         study_name=None,
+         washout=0,
+         seed=None,
+         reservoir_limit=200,
+         spectral_radius_limit=0.9,
+         feedback_limit = 0,
+         sparsity_limit = 0.1,
+         leak_rate_limit = 1.0,
+         input_scaling_limit= 1.0,
+         bias_scaling_limit=0.2,
+         ridge_param_limit=  1e-6,
+         learning_algo="inv",
+         **study_kwargs):
+        
         import optuna
 
+
         def objective(trial):
-            # Set defaults
-            reservoir_size = trial.suggest_int("reservoir_size", *reservoir_limit) if reservoir_limit else 100
-            spectral_radius = trial.suggest_float("spectral_radius", *spectral_radius_limit) if spectral_radius_limit else 0.9
-            feedback = trial.suggest_int("feedback", *feedback_limit) if feedback_limit else 0
-            sparsity = trial.suggest_float("sparsity", *sparsity_limit) if sparsity_limit else 0.2
-            leak_rate = trial.suggest_float("leak_rate", *leak_rate_limit) if leak_rate_limit else 1.0
-            input_scaling = trial.suggest_float("input_scaling", *input_scaling_limit) if input_scaling_limit else 1.0
-            bias_scaling = trial.suggest_float("bias_scaling", *bias_scaling_limit) if bias_scaling_limit else 0.2
-            ridge_param = trial.suggest_float("ridge_param", *ridge_param_limit, log=True) if ridge_param_limit else 1e-6
+            # Suggest or use fixed hyperparameters
+            reservoir_size = trial.suggest_int("reservoir_size", *reservoir_limit) if isinstance(reservoir_limit, list) else reservoir_limit
+            spectral_radius = trial.suggest_float("spectral_radius", *spectral_radius_limit) if isinstance(spectral_radius_limit, list) else spectral_radius_limit
+            feedback = trial.suggest_int("feedback", *feedback_limit) if isinstance(feedback_limit, list) else feedback_limit
+            sparsity = trial.suggest_float("sparsity", *sparsity_limit) if isinstance(sparsity_limit, list) else sparsity_limit
+            leak_rate = trial.suggest_float("leak_rate", *leak_rate_limit) if isinstance(leak_rate_limit, list) else leak_rate_limit
+            input_scaling = trial.suggest_float("input_scaling", *input_scaling_limit) if isinstance(input_scaling_limit, list) else input_scaling_limit
+            bias_scaling = trial.suggest_float("bias_scaling", *bias_scaling_limit) if isinstance(bias_scaling_limit, list) else bias_scaling_limit
+            ridge_param = trial.suggest_float("ridge_param", *ridge_param_limit, log=True) if isinstance(ridge_param_limit, list) else ridge_param_limit
+
 
             model = ESN(
                 base_input_dim=input_list[0].shape[1],

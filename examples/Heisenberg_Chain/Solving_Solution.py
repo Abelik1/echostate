@@ -148,27 +148,27 @@ class ESNPredictor:
         self.esn.trainer.debug_covariance()
 
 
-def Heisen_tune():
+def Heisen_tune(predictor, study_name, washout, seed):
     from optuna.visualization import plot_optimization_history, plot_param_importances, plot_parallel_coordinate, plot_slice, plot_contour, plot_edf
 
     input_list, target_list = predictor._build_dataset()
 
     # ------------ Run Optuna
-    study = ESN.tune(input_list, target_list, n_trials=0, direction="minimize",study_name = study_name, washout = washout, seed = seed,
-                    reservoir_limit = 1300,
+    study = ESN.tune(input_list, target_list, n_trials=550, direction="minimize",study_name = study_name, washout = washout, seed = seed,
+                    reservoir_limit = [100,1000],
                     spectral_radius_limit = [0.1, 1.7],
-                    feedback_limit = 1,
+                    feedback_limit = [1,2],
                     input_scaling_limit = [0.05, 5.0],
-                    ridge_param_limit = [1e-7, 1e-2],
+                    ridge_param_limit = [1e-7, 1],
                     leak_rate_limit = [0.1, 1.0],
-                    # sparsity_limit = [0.2, 0.6],
+                    sparsity_limit = 0.2,
                     )
-    plot_optimization_history(study).show()
-    plot_param_importances(study).show()
-    plot_parallel_coordinate(study).show()
-    plot_slice(study).show()
-    plot_contour(study).show()
-    plot_edf(study).show()
+    # plot_optimization_history(study).show()
+    # plot_param_importances(study).show()
+    # plot_parallel_coordinate(study).show()
+    # plot_slice(study).show()
+    # plot_contour(study).show()
+    # plot_edf(study).show()
     # ----- Print best params
     print("Best hyperparameters:", study.best_params)
     print("Best MAE:", study.best_value)
@@ -180,71 +180,84 @@ if __name__ == '__main__':
     T = 1_000
     # steps = 10_000
     N = 5
-    dt = 0.25
-    steps = int(T/dt)
+    seed = 3141
     qubit = 0
     washout = 200
-    seed = None
+    dt = 0.05
     training_depth = 6
-        
-    # simulate once or load from pickle
+    
+    steps = int(T/dt)
     name = f"Seed{seed}_Qbts{N}_dt{dt}".replace(".","_",1)
-    study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
-    
-    
     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
     model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
     np.random.seed(seed)
     chain = HeisenbergChain(N, dt=dt)
+    chain.evolve(steps=steps)
     
-    try:
-        with open(histories_path, 'rb') as f:
-            chain.history = pickle.load(f)
-    except FileNotFoundError:
-        chain.evolve(steps=steps)
-        with open(histories_path, 'wb') as f:
-            pickle.dump(chain.history, f)
+    for dt in np.arange(0.1,0.5, 0.05):
+        
+    
+        steps = int(T/dt)
             
-    chain.plot_spin_grid(400)
-    # print(chain.history[1][:10])
-    
-    predictor = ESNPredictor(
-        steps=steps,
-        dt=dt,
-        N=N,
-        history_arrays=chain.history,
-        dims=chain.dims,
-        qubit=qubit,
+        # simulate once or load from pickle
+        name = f"Seed{seed}_Qbts{N}_dt{dt}".replace(".","_",1)
+        study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
+        history = []
         
-        reservoir_size=747,
-        spectral_radius=0.5577,
-        feedback=2,
-        input_scaling=0.1341,
-        ridge_param=0.3755,
-        leak_rate=0.5122,
-        sparsity=0.44876,
+        histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
+        model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
+        # np.random.seed(seed)
+        # chain = HeisenbergChain(N, dt=dt)
         
-        washout=washout,
-        batch_size=training_depth,
-        training_depth=training_depth,
-        model_path = model_path,
-        seed = seed,
-    )
+        # try:
+        #     with open(histories_path, 'rb') as f:
+        #         chain.history = pickle.load(f)
+        # except FileNotFoundError:
+        #     chain.evolve(steps=steps)
+        #     with open(histories_path, 'wb') as f:
+        #         pickle.dump(chain.history, f)
+        for i,element in enumerate(chain.history):
+            history.append(element[::int(dt/0.05)])
+        
+        # chain.plot_spin_grid(400)
+        # print(chain.history[1][:10])
+        
+        predictor = ESNPredictor(
+            steps=steps,
+            dt=dt,
+            N=N,
+            history_arrays=history,
+            dims=chain.dims,
+            qubit=qubit,
+            
+            reservoir_size=747,
+            spectral_radius=0.5577,
+            feedback=2,
+            input_scaling=0.1341,
+            ridge_param=0.3755,
+            leak_rate=0.5122,
+            sparsity=0.44876,
+            
+            washout=washout,
+            batch_size=training_depth,
+            training_depth=training_depth,
+            model_path = model_path,
+            seed = seed,
+        )
 
-    # if not os.path.exists(model_path):
-    #     predictor.train()
-    #     torch.save(predictor.esn, model_path)
-    # if not os.path.exists(model_path):
-    #     predictor.train()
-    #     torch.save(predictor.esn, model_path)
+        # if not os.path.exists(model_path):
+        #     predictor.train()
+        #     torch.save(predictor.esn, model_path)
+        # if not os.path.exists(model_path):
+        #     predictor.train()
+        #     torch.save(predictor.esn, model_path)
+            
+        # predictor.debug()
+        # predictor.predict_and_plot()
+        # predictor.debug()
+        # predictor.predict_and_plot()
         
-    # predictor.debug()
-    # predictor.predict_and_plot()
-    # predictor.debug()
-    # predictor.predict_and_plot()
-    
-    # ------Prepare dataset
-    
-    Heisen_tune()
-    Heisen_tune()
+        # ------Prepare dataset
+        
+        Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed)
         
