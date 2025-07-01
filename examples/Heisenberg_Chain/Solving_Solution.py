@@ -148,7 +148,7 @@ class ESNPredictor:
         self.esn.trainer.debug_covariance()
 
 
-def optuna():
+def Heisen_tune():
     input_list, target_list = predictor._build_dataset()
 
     # ------------ Run Optuna
@@ -223,14 +223,14 @@ if __name__ == '__main__':
         seed = seed,
     )
 
-    if not os.path.exists(model_path):
-        predictor.train()
-        torch.save(predictor.esn, model_path)
+    # if not os.path.exists(model_path):
+    #     predictor.train()
+    #     torch.save(predictor.esn, model_path)
         
-    predictor.debug()
-    predictor.predict_and_plot()
+    # predictor.debug()
+    # predictor.predict_and_plot()
     
     # ------Prepare dataset
     
-    # optuna()
+    Heisen_tune()
         

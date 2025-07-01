@@ -207,7 +207,7 @@ class ESN(torch.nn.Module):
         study = optuna.create_study(
             direction=direction,
             study_name=study_name,
-            storage=f"sqlite:///{study_name}.db" if study_name else None,
+            storage=f"sqlite:///examples/Heisenberg_Chain/trained_esns/{study_name}.db" if study_name else None,
             load_if_exists=True
         )
         study.optimize(objective, n_trials=n_trials, **study_kwargs)
