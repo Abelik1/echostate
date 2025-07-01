@@ -234,11 +234,17 @@ if __name__ == '__main__':
     # if not os.path.exists(model_path):
     #     predictor.train()
     #     torch.save(predictor.esn, model_path)
+    # if not os.path.exists(model_path):
+    #     predictor.train()
+    #     torch.save(predictor.esn, model_path)
         
+    # predictor.debug()
+    # predictor.predict_and_plot()
     # predictor.debug()
     # predictor.predict_and_plot()
     
     # ------Prepare dataset
     
+    Heisen_tune()
     Heisen_tune()
         
