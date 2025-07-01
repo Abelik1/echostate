@@ -12,7 +12,7 @@ from echostate import ESN  # <-- our new ESN module
 from .Heisenberg_sim import HeisenbergChain
 from echostate.utils import mean_absolute_error
 
-device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class ESNPredictor:
@@ -101,14 +101,17 @@ class ESNPredictor:
                 X = torch.tensor(z_series[:-1], dtype=torch.float32)    .unsqueeze(-1)
                 Y = torch.tensor(z_series[1:],  dtype=torch.float32)    .unsqueeze(-1)
 
-                input_list.append(X.to(device))
-                target_list.append(Y.to(device))
-
+                input_list.append(X)
+                target_list.append(Y)
+        # Pad and batch into single tensors
+        X_batch = torch.nn.utils.rnn.pad_sequence(input_list, batch_first=True).to(device)
+        Y_batch = torch.nn.utils.rnn.pad_sequence(target_list, batch_first=True).to(device)
+        
         # ensure it matches batch_size
         assert len(input_list) == self.batch_size, \
             f"Expected batch_size={self.batch_size}, got {len(input_list)} sequences"
 
-        return input_list, target_list
+        return X_batch, Y_batch
 
     def train(self):
         input_list, target_list = self._build_dataset()
@@ -125,8 +128,8 @@ class ESNPredictor:
                               Qobj(rho, dims=self.dims).ptrace(self.qubit)))
                   for rho in self.test_history]
         # print(z_test[:10]) #TODO REMOVE
-        X_test = torch.tensor(z_test[:-1], dtype=torch.float32).unsqueeze(-1).to(device)
-        preds = self.esn.predict([X_test])[0].cpu().numpy().flatten()
+        X_test, _ = self._build_dataset()
+        preds = self.esn.predict(X_test)[0].cpu().numpy().flatten()
 
         # true targets
         true = z_test[self.washout + 1 : len(preds) + self.washout + 1]

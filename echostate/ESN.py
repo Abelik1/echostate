@@ -53,51 +53,46 @@ class ESN(torch.nn.Module):
         # return fresh reservoir state
         return torch.zeros(self.reservoir.reservoir_size)
 
-    def fit(self, input_list, target_list):
+    def fit(self, X_batch, Y_batch):
         """
         Train ESN on a batch of sequences with teacher-forced feedback.
         input_list: list of Tensors, each (T, base_input_dim)
         target_list: list of Tensors, each (T, output_dim)
         """
-        all_states = []
-        all_targets = []
-
-        for seq_idx in range(self.batch_size):
-            base_inputs = input_list[seq_idx]
-            targets = target_list[seq_idx]
-            T = base_inputs.shape[0]
-            x = self.reset_state()
-            states = []
-
-            for t in range(T):
-                # build input with feedback
-                u_base = base_inputs[t]
-                if self.feedback > 0:
-                    fb_vals = []
-                    for j in range(1, self.feedback+1):
-                        idx = t - j
-                        if idx >= 0:
-                            fb_vals.append(targets[idx])
-                        else:
-                            fb_vals.append(torch.zeros(self.output_dim, device=u_base.device))
-                    u = torch.cat([u_base] + fb_vals, dim=0)
-                else:
-                    u = u_base
-                x = self.reservoir.update(x, u, self.leak_rate)
-                if t >= self.washout:
-                    states.append(x.clone())
-                    
-            states = torch.stack(states)  # Now it's a tensor
-            bias = torch.ones(states.size(0), 1, device=states.device)
-            states = torch.cat([states, bias], dim=1)
-
-            all_states.append(states)  # No need to stack again
-            all_targets.append(targets[self.washout:])
         
-        
-        X = torch.cat(all_states, dim=0)
-        Y = torch.cat(all_targets, dim=0)
-        self.W_out = self.trainer.fit(X, Y)
+        """
+        Vectorized ESN training over a batch of sequences.
+
+        Args:
+            X_batch: Tensor of shape (B, T, input_dim)
+            Y_batch: Tensor of shape (B, T, output_dim)
+        """
+        B, T, _ = X_batch.shape
+        device = X_batch.device
+
+        # Initialize hidden state for all sequences
+        x = torch.zeros(B, self.reservoir.reservoir_size, device=device)
+
+        state_list = []
+        target_list = []
+
+        for t in range(T):
+            u = X_batch[:, t, :]  # (B, input_dim)
+            x = self.reservoir.update_batch(x, u, self.leak_rate)  # (B, R)
+
+            if t >= self.washout:
+                # Add bias to state vector
+                bias = torch.ones(B, 1, device=device)
+                x_with_bias = torch.cat([x, bias], dim=1)  # (B, R+1)
+                state_list.append(x_with_bias)
+                target_list.append(Y_batch[:, t, :])       # (B, output_dim)
+
+        # Stack all time steps into a long sequence
+        X_all = torch.cat(state_list, dim=0)   # (B*(T-washout), R+1)
+        Y_all = torch.cat(target_list, dim=0)  # (B*(T-washout), output_dim)
+
+        # Train the readout weights using ridge regression
+        self.W_out = self.trainer.fit(X_all, Y_all)
 
     def forward(self, inputs):
         """

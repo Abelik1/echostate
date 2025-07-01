@@ -32,6 +32,7 @@ class Reservoir:
         W = W * (spectral_radius / radius)
         return W
 
-    def update(self, x, u, leak_rate):
-        pre = self.W_in @ u + self.W @ x + self.W_bias.squeeze()
+    def update_batch(self, x, u, leak_rate):
+        # x: (B, R), u: (B, input_dim)
+        pre = u @ self.W_in.T + x @ self.W.T + self.W_bias.T  # broadcast bias
         return (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
