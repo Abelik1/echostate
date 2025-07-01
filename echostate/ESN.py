@@ -67,8 +67,6 @@ class ESN(torch.nn.Module):
         state_list = []
         target_list = []
 
-        # prepare previous outputs buffer
-        prev_outputs = torch.zeros(B, self.feedback * output_dim, device=device)
 
         for t in range(T):
             u_base = X_batch[:, t, :]  # (B, base_input_dim)

@@ -12,7 +12,7 @@ from echostate import ESN  # <-- our new ESN module
 from .Heisenberg_sim import HeisenbergChain
 from echostate.utils import mean_absolute_error
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
 
 
 class ESNPredictor:
@@ -151,19 +151,19 @@ class ESNPredictor:
         self.esn.trainer.debug_covariance()
 
 
-def Heisen_tune(predictor, study_name, washout, seed):
+def Heisen_tune(predictor, study_name, washout, seed, n_trials):
     from optuna.visualization import plot_optimization_history, plot_param_importances, plot_parallel_coordinate, plot_slice, plot_contour, plot_edf
 
     input_list, target_list = predictor._build_dataset()
 
     # ------------ Run Optuna
-    study = ESN.tune(input_list, target_list, n_trials=550, direction="minimize",study_name = study_name, washout = washout, seed = seed,
-                    reservoir_limit = [100,1000],
+    study = ESN.tune(input_list, target_list, n_trials=n_trials, direction="minimize",study_name = study_name, washout = washout, seed = seed,
+                    reservoir_limit = 900,
                     spectral_radius_limit = [0.1, 1.7],
-                    feedback_limit = [1,2],
+                    feedback_limit = 1,
                     input_scaling_limit = [0.05, 5.0],
                     ridge_param_limit = [1e-7, 1],
-                    leak_rate_limit = [0.1, 1.0],
+                    leak_rate_limit = [0.8, 1.0],
                     sparsity_limit = 0.2,
                     )
     # plot_optimization_history(study).show()
@@ -173,10 +173,11 @@ def Heisen_tune(predictor, study_name, washout, seed):
     # plot_contour(study).show()
     # plot_edf(study).show()
     # ----- Print best params
+    print(dt)
     print("Best hyperparameters:", study.best_params)
     print("Best MAE:", study.best_value)
     
-    
+ 
 
 if __name__ == '__main__':
     # Example usage
@@ -188,22 +189,21 @@ if __name__ == '__main__':
     washout = 200
     dt = 0.05
     training_depth = 6
+    n_trials = 550
     
     steps = int(T/dt)
-    name = f"Seed{seed}_Qbts{N}_dt{dt}".replace(".","_",1)
+    name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
     model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
     np.random.seed(seed)
     chain = HeisenbergChain(N, dt=dt)
     chain.evolve(steps=steps)
     
-    for dt in np.arange(0.1,0.5, 0.05):
-        
-    
+    for dt in np.arange(0.1,0.4, 0.05):
         steps = int(T/dt)
             
         # simulate once or load from pickle
-        name = f"Seed{seed}_Qbts{N}_dt{dt}".replace(".","_",1)
+        name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
         study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
         history = []
         
@@ -262,5 +262,5 @@ if __name__ == '__main__':
         
         # ------Prepare dataset
         
-        Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed)
+        Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed , n_trials=n_trials)
         
