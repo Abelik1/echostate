@@ -55,76 +55,88 @@ class ESN(torch.nn.Module):
 
     def fit(self, X_batch, Y_batch):
         """
-        Train ESN on a batch of sequences with teacher-forced feedback.
-        input_list: list of Tensors, each (T, base_input_dim)
-        target_list: list of Tensors, each (T, output_dim)
+        X_batch: (B, T, base_input_dim)
+        Y_batch: (B, T, output_dim)
         """
-        
-        """
-        Vectorized ESN training over a batch of sequences.
-
-        Args:
-            X_batch: Tensor of shape (B, T, input_dim)
-            Y_batch: Tensor of shape (B, T, output_dim)
-        """
-        B, T, _ = X_batch.shape
+        B, T, base_input_dim = X_batch.shape
         device = X_batch.device
+        output_dim = self.output_dim
 
-        # Initialize hidden state for all sequences
         x = torch.zeros(B, self.reservoir.reservoir_size, device=device)
 
         state_list = []
         target_list = []
 
+        # prepare previous outputs buffer
+        prev_outputs = torch.zeros(B, self.feedback * output_dim, device=device)
+
         for t in range(T):
-            u = X_batch[:, t, :]  # (B, input_dim)
-            x = self.reservoir.update_batch(x, u, self.leak_rate)  # (B, R)
+            u_base = X_batch[:, t, :]  # (B, base_input_dim)
+
+            if self.feedback > 0:
+                if t >= self.feedback:
+                    fb = []
+                    for j in range(1, self.feedback + 1):
+                        fb.append(Y_batch[:, t - j, :])  # use teacher forcing
+                    u_fb = torch.cat(fb, dim=1)  # (B, feedback * output_dim)
+                else:
+                    u_fb = torch.zeros(B, self.feedback * output_dim, device=device)
+                u = torch.cat([u_base, u_fb], dim=1)
+            else:
+                u = u_base
+
+            x = self.reservoir.update_batch(x, u, self.leak_rate)
 
             if t >= self.washout:
-                # Add bias to state vector
-                bias = torch.ones(B, 1, device=device)
-                x_with_bias = torch.cat([x, bias], dim=1)  # (B, R+1)
-                state_list.append(x_with_bias)
-                target_list.append(Y_batch[:, t, :])       # (B, output_dim)
+                xb = torch.cat([x, torch.ones(B, 1, device=device)], dim=1)  # bias
+                state_list.append(xb)
+                target_list.append(Y_batch[:, t, :])
 
-        # Stack all time steps into a long sequence
-        X_all = torch.cat(state_list, dim=0)   # (B*(T-washout), R+1)
+        X_all = torch.cat(state_list, dim=0)  # (B*(T-washout), R+1)
         Y_all = torch.cat(target_list, dim=0)  # (B*(T-washout), output_dim)
 
-        # Train the readout weights using ridge regression
         self.W_out = self.trainer.fit(X_all, Y_all)
 
     def forward(self, inputs):
         """
-        Run ESN on a single sequence with autoregressive feedback.
-        inputs: Tensor (T, base_input_dim)
-        returns: Tensor (T-washout, output_dim)
+        Run ESN on one sequence (T, base_input_dim) with autoregressive feedback.
+        Returns Tensor (T - washout, output_dim).
         """
         T = inputs.shape[0]
-        x = self.reset_state()
+        device = inputs.device
+
+        # start with a 1-D reservoir state
+        x = torch.zeros(self.reservoir.reservoir_size, device=device)
         prev_outputs = []
         outputs = []
 
         for t in range(T):
-            u_base = inputs[t]
+            u_base = inputs[t]                               # (base_input_dim,)
+            # --- build feedback portion ---
             if self.feedback > 0:
-                fb_vals = []
-                for j in range(1, self.feedback+1):
+                fb = []
+                for j in range(1, self.feedback + 1):
                     if len(prev_outputs) >= j:
-                        fb_vals.append(prev_outputs[-j])
+                        fb.append(prev_outputs[-j])         # each is (output_dim,)
                     else:
-                        fb_vals.append(torch.zeros(self.output_dim, device=u_base.device))
-                u = torch.cat([u_base] + fb_vals, dim=0)
+                        fb.append(torch.zeros(self.output_dim, device=device))
+                u = torch.cat([u_base, *fb], dim=0)         # (input_dim,)
             else:
-                u = u_base
-            x = self.reservoir.update(x, u, self.leak_rate)
-            xb = torch.cat([x, torch.tensor([1.0], device=x.device)])
-            y  = self.W_out @ xb
+                u = u_base                                  # (input_dim,)
+
+            # vectorized update_batch handles 1-D just like a batch of 1
+            x = self.reservoir.update_batch(x, u, self.leak_rate)  # returns (R,)
+
+            # readout
+            bias = torch.tensor([1.0], device=device)      # shape (1,)
+            xb   = torch.cat([x, bias], dim=0)             # shape (R+1,)
+            y    = self.W_out @ xb                         # (output_dim,)
             prev_outputs.append(y)
+
             if t >= self.washout:
                 outputs.append(y)
 
-        return torch.stack(outputs)
+        return torch.stack(outputs)                        # (T-washout, output_dim)
 
     def predict(self, input_list, target_list=None):
         """
