@@ -157,52 +157,58 @@ class ESN(torch.nn.Module):
             target_list,
             n_trials=50,
             direction="minimize",
-            study_name = None,
+            study_name=None,
             washout=0,
-            seed = None,
-            reservoir_limit = [50,1000],
-            spectral_radius_limit = [0.1, 1.4],
-            feedback_limit = [0, 5],
-            input_scaling_limit = [0.05, 5.0],
-            ridge_param_limit = [1e-7, 1.0],
-            leak_rate_limit = [0.1, 1.0],
-            sparsity_limit = [0.05, 1.0],
+            seed=None,
+            reservoir_limit=None,
+            spectral_radius_limit=None,
+            feedback_limit=None,
+            sparsity_limit=None,
+            leak_rate_limit=None,
+            input_scaling_limit=None,
+            bias_scaling_limit=None,
+            ridge_param_limit=None,
+            learning_algo="inv",
             **study_kwargs):
         import optuna
-        
-        
-        """
-        Hyperparameter tuning using Optuna.
-        Returns the Optuna Study object.
-        """
-        def objective(trial):
-            reservoir_size = trial.suggest_int("reservoir_size", reservoir_limit[0], reservoir_limit[1])
-            spectral_radius = trial.suggest_float("spectral_radius", spectral_radius_limit[0],spectral_radius_limit[1])
-            feedback = trial.suggest_int("feedback", feedback_limit[0], feedback_limit[1])
-            input_scaling = trial.suggest_float("input_scaling", input_scaling_limit[0], input_scaling_limit[1])
-            ridge_param = trial.suggest_float("ridge_param", ridge_param_limit[0], ridge_param_limit[1], log=True)
-            leak_rate = trial.suggest_float("leak_rate", leak_rate_limit[0], leak_rate_limit[1])
-            sparsity = trial.suggest_float("sparsity", sparsity_limit[0], sparsity_limit[1])
 
-            model = ESN(base_input_dim=input_list[0].shape[1],
-                        reservoir_size=reservoir_size,
-                        output_dim=target_list[0].shape[1],
-                        feedback=feedback,
-                        spectral_radius=spectral_radius,
-                        sparsity=sparsity,
-                        input_scaling=input_scaling,
-                        ridge_param=ridge_param,
-                        leak_rate=leak_rate,
-                        washout= washout,
-                        batch_size=len(input_list),
-                        seed = seed)
-                        
+        def objective(trial):
+            # Set defaults
+            reservoir_size = trial.suggest_int("reservoir_size", *reservoir_limit) if reservoir_limit else 100
+            spectral_radius = trial.suggest_float("spectral_radius", *spectral_radius_limit) if spectral_radius_limit else 0.9
+            feedback = trial.suggest_int("feedback", *feedback_limit) if feedback_limit else 0
+            sparsity = trial.suggest_float("sparsity", *sparsity_limit) if sparsity_limit else 0.1
+            leak_rate = trial.suggest_float("leak_rate", *leak_rate_limit) if leak_rate_limit else 1.0
+            input_scaling = trial.suggest_float("input_scaling", *input_scaling_limit) if input_scaling_limit else 1.0
+            bias_scaling = trial.suggest_float("bias_scaling", *bias_scaling_limit) if bias_scaling_limit else 0.2
+            ridge_param = trial.suggest_float("ridge_param", *ridge_param_limit, log=True) if ridge_param_limit else 1e-6
+
+            model = ESN(
+                base_input_dim=input_list[0].shape[1],
+                reservoir_size=reservoir_size,
+                output_dim=target_list[0].shape[1],
+                feedback=feedback,
+                spectral_radius=spectral_radius,
+                sparsity=sparsity,
+                leak_rate=leak_rate,
+                input_scaling=input_scaling,
+                bias_scaling=bias_scaling,
+                ridge_param=ridge_param,
+                learning_algo=learning_algo,
+                washout=washout,
+                batch_size=len(input_list),
+                seed=seed
+            )
+
             model.fit(input_list, target_list)
             _, metrics = model.predict(input_list, target_list)
             return metrics['mae']
 
-        study = optuna.create_study(direction=direction, study_name=study_name,
-                storage=f"sqlite:///examples/Heisenberg_Chain/trained_esns/{study_name}.db", #TODO REMOVE THE PATH
-                load_if_exists=True)
+        study = optuna.create_study(
+            direction=direction,
+            study_name=study_name,
+            storage=f"sqlite:///{study_name}.db" if study_name else None,
+            load_if_exists=True
+        )
         study.optimize(objective, n_trials=n_trials, **study_kwargs)
         return study
