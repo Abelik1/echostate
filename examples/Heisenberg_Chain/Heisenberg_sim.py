@@ -112,8 +112,10 @@ if __name__ == '__main__':
     all_z = []
     all_times = []
     errors = []
+
     histories_path_time = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_alltimes.pkl'  
     histories_path_z = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_allz.pkl'  
+
     
     # Load or generate all trajectories
     try:
