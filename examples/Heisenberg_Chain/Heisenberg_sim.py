@@ -104,7 +104,7 @@ if __name__ == '__main__':
     N = 5
     T = 1000
     qubit = 0
-    dt_list = np.arange(0.01, 1.01, 0.01) 
+    dt_list = np.arange(0.01, 1.8, 0.01) 
     seed = 31
     target_points = 10_000
 
@@ -174,10 +174,10 @@ if __name__ == '__main__':
     plt.title("Fidelity loss with increasing dt")
     plt.grid(True)
     plt.tight_layout()
-    
+    num = 140
     plt.figure()
     plt.plot(all_times[0], all_z[0], label = f"Best {all_times[0][1]}")
-    plt.plot(all_times[80], all_z[80], label = f"Less {all_times[80][1]}")
+    plt.plot(all_times[num], all_z[num], label = f"Less {all_times[num][1]}")
     plt.legend()
     plt.show()
 
