@@ -73,7 +73,6 @@ class ESNPredictor:
         self.histories = []
         np.random.seed(seed)
         for _ in range(training_depth):
-            
             chain = HeisenbergChain(N, dt=dt)
             chain.evolve(steps=steps)
             self.histories.append(chain.history)
@@ -119,39 +118,71 @@ class ESNPredictor:
         self.esn.fit(input_list, target_list)
         
 
-    def predict_and_plot(self):
+    def predict_and_plot(self, acc_z_history=None):
         """
-        Run prediction on self.test_history, then plot true vs predicted.
+        Run prediction on self.test_history, then plot true vs predicted,
+        with optional comparison to high-resolution accurate data.
         """
-        # build a single test sequence from test_history
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import re
+        from qutip import Qobj, sigmaz, expect
+        from echostate.utils import mean_absolute_error
+
+        acc_dt = acc_chain.dt
+        # build ⟨σ_z⟩ trajectory from test history
         z_test = [float(expect(sigmaz(),
-                              Qobj(rho, dims=self.dims).ptrace(self.qubit)))
-                  for rho in self.test_history]
-        # print(z_test[:10]) #TODO REMOVE
+                            Qobj(rho, dims=self.dims).ptrace(self.qubit)))
+                for rho in self.test_history]
+
+        # build accurate ⟨σ_z⟩ trajectory if provided
+        if acc_z_history:
+            acc_z = [float(expect(sigmaz(),
+                                Qobj(rho, dims=acc_chain.dims).ptrace(self.qubit)))
+                    for rho in acc_z_history]
+            
+
+        # generate ESN predictions
         X_test, _ = self._build_dataset()
         preds = self.esn.predict(X_test)[0].cpu().numpy().flatten()
 
-        # true targets
-        true = z_test[self.washout + 1 : len(preds) + self.washout + 1]
+        # true targets for comparison
+        true = z_test[self.washout+1: len(preds) + self.washout+1]
 
-        # plot
-        plt.figure(figsize=(8,4))
+        # time axes
+        coarse_t = np.arange(len(preds)) * self.dt
+        true_t = np.arange(len(true)) * self.dt
         
-        plt.plot(preds, label='predicted ⟨σ_z⟩')
-        plt.plot(true,  label='true ⟨σ_z⟩')
+        if acc_z_history:
+            washout_acc_steps = int((self.washout*self.dt)/acc_chain.dt)
+            acc_z = acc_z[int(washout_acc_steps+(self.dt/acc_chain.dt)):]
+            acc_t = np.arange(len(acc_z)) * acc_dt
+        # plot
+        plt.figure(figsize=(8, 4))
+        if acc_z_history:
+            plt.plot(acc_t, acc_z,"-o", label="Fully Accurate", markersize = "1")
+        plt.plot(coarse_t, preds, label='Predicted ⟨σ_z⟩')
+        plt.plot(true_t, true, label='True ⟨σ_z⟩')
+        plt.xlim(800,900)
+        plt.xlabel("Time")
+        plt.ylabel("⟨σ_z⟩")
         plt.legend()
         plt.title('ESN Prediction of Single‐Qubit Dynamics')
-        plt.savefig(re.sub(r"(Qbts)", r"\1({})".format(self.qubit+1), f"./examples/Heisenberg_Chain/cache/Errors_{name}.png"))
+
+        # Save and show
+        plt.savefig(re.sub(r"(Qbts)", r"\1({})".format(self.qubit + 1),
+                        f"./examples/Heisenberg_Chain/cache/Errors_{name}.png"),format="pdf")
         mae = mean_absolute_error(torch.tensor(preds), torch.tensor(true))
         print(f"MAE on test: {mae.item():.4f}")
         plt.show()
+
 
     def debug(self):
         """Check covariance conditioning after training."""
         self.esn.trainer.debug_covariance()
 
 
-def Heisen_tune(predictor, study_name, washout, seed, n_trials):
+def Heisen_tune(predictor, study_name, washout, seed, n_trials, plots = False):
     from optuna.visualization import plot_optimization_history, plot_param_importances, plot_parallel_coordinate, plot_slice, plot_contour, plot_edf
 
     input_list, target_list = predictor._build_dataset()
@@ -166,53 +197,39 @@ def Heisen_tune(predictor, study_name, washout, seed, n_trials):
                     leak_rate_limit = [0.8, 1.0],
                     sparsity_limit = 0.2,
                     )
-    # plot_optimization_history(study).show()
-    # plot_param_importances(study).show()
-    # plot_parallel_coordinate(study).show()
-    # plot_slice(study).show()
-    # plot_contour(study).show()
-    # plot_edf(study).show()
+    if plots:
+        plot_optimization_history(study).show()
+        plot_param_importances(study).show()
+        plot_parallel_coordinate(study).show()
+        plot_slice(study).show()
+        plot_contour(study).show()
+        plot_edf(study).show()
     # ----- Print best params
     print(dt)
     print("Best hyperparameters:", study.best_params)
     print("Best MAE:", study.best_value)
-    
+    return study
 
-def dt_loop(dt):
-    steps = int(T/dt)
-    name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
-    histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
-    model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
-    np.random.seed(seed)
-    chain = HeisenbergChain(N, dt=dt)
-    chain.evolve(steps=steps)
-    
-    for dt in np.arange(0.1,0.4, 0.05):
-        steps = int(T/dt)
-            
-        # simulate once or load from pickle
-        name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
+
+def dt_loop():
+    best_params_dict = {}
+
+    for dt in np.arange(0.1, 0.4, 0.05):
+        steps = int(T / dt)
+        name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".", "_", 1)
         study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{round(dt,5)}_dpth{training_depth}"
-        history = []
-        
-        histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
         model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
-        # np.random.seed(seed)
-        # chain = HeisenbergChain(N, dt=dt)
-        
-        # try:
-        #     with open(histories_path, 'rb') as f:
-        #         chain.history = pickle.load(f)
-        # except FileNotFoundError:
-        #     chain.evolve(steps=steps)
-        #     with open(histories_path, 'wb') as f:
-        #         pickle.dump(chain.history, f)
-        for i,element in enumerate(chain.history):
-            history.append(element[::int(dt/0.05)])
-        
-        # chain.plot_spin_grid(400)
-        # print(chain.history[1][:10])
-        
+
+        # simulate chain
+        np.random.seed(seed)
+        chain = HeisenbergChain(N, dt=dt)
+        chain.evolve(steps=steps)
+
+        # downsample history
+        history = []
+        for element in chain.history:
+            history.append(element[::int(dt / 0.05)])
+
         predictor = ESNPredictor(
             steps=steps,
             dt=dt,
@@ -220,114 +237,114 @@ def dt_loop(dt):
             history_arrays=history,
             dims=chain.dims,
             qubit=qubit,
-            
-            reservoir_size=747,
-            spectral_radius=0.5577,
-            feedback=2,
-            input_scaling=0.1341,
-            ridge_param=0.3755,
-            leak_rate=0.5122,
-            sparsity=0.44876,
-            
-            washout=washout,
             batch_size=training_depth,
             training_depth=training_depth,
-            model_path = model_path,
-            seed = seed,
+            model_path=model_path,
+            seed=seed,
         )
 
-        # if not os.path.exists(model_path):
-        #     predictor.train()
-        #     torch.save(predictor.esn, model_path)
-        # if not os.path.exists(model_path):
-        #     predictor.train()
-        #     torch.save(predictor.esn, model_path)
-            
-        # predictor.debug()
-        # predictor.predict_and_plot()
-        # predictor.debug()
-        # predictor.predict_and_plot()
-        
-        # ------Prepare dataset
-        
-        Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed , n_trials=n_trials)
+        study = Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed, n_trials=n_trials)
+        best_params_dict[str(round(dt, 5))] = study.best_params
+
+    # Save all best parameters to JSON
+    output_path = "./examples/Heisenberg_Chain/trained_esns/best_params_by_dt.json"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(best_params_dict, f, indent=4)
      
    
 if __name__ == '__main__':
-    # Example usage
+    import os
+    import json
+    import pickle
+    import torch
+    import numpy as np
+
+    # ---- Initialization
     T = 1_000
-    # steps = 10_000
     N = 5
     seed = 3141
     qubit = 0
     washout = 200
-    dt = 0.05
+    dt = 0.35
     training_depth = 6
-    n_trials = 0 
-    
-    dt_loop(dt)
-    # steps = int(T/dt)
-    # name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
-    # histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
-    # model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
-    # study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
-    
-    # np.random.seed(seed)
-    # chain = HeisenbergChain(N, dt=dt)
-    # chain.evolve(steps=steps)
-    
-    
-    # steps = int(T/dt)
-            
-    # # simulate once or load from pickle
-    
-    
-    # try:
-    #     with open(histories_path, 'rb') as f:
-    #         chain.history = pickle.load(f)
-    # except FileNotFoundError:
-    #     chain.evolve(steps=steps)
-    #     with open(histories_path, 'wb') as f:
-    #         pickle.dump(chain.history, f)
-    
-    
-    # chain.plot_spin_grid(400)
-    # print(chain.history[1][:10])
-    
-    # predictor = ESNPredictor(
-    #     steps=steps,
-    #     dt=dt,
-    #     N=N,
-    #     history_arrays=chain.history,
-    #     dims=chain.dims,
-    #     qubit=qubit,
-        
-    #     reservoir_size=747,
-    #     spectral_radius=0.5577,
-    #     feedback=2,
-    #     input_scaling=0.1341,
-    #     ridge_param=0.3755,
-    #     leak_rate=0.5122,
-    #     sparsity=0.44876,
-        
-    #     washout=washout,
-    #     batch_size=training_depth,
-    #     training_depth=training_depth,
-    #     model_path = model_path,
-    #     seed = seed,
-    # )
+    n_trials = -1  # set > 0 to tune and save new best hyperparams
 
-    # # if not os.path.exists(model_path):
-    # #     predictor.train()
-    # #     torch.save(predictor.esn, model_path)
-    # # if not os.path.exists(model_path):
-    # #     predictor.train()
-    # #     torch.save(predictor.esn, model_path)
-        
-    # # predictor.debug()
-    # # predictor.predict_and_plot()
+    np.random.seed(seed)
     
-    # # ------Prepare dataset
+    acc_dt = 0.05
+    acc_chain = HeisenbergChain(N,dt=acc_dt)
+    acc_steps = int(T / acc_dt)
+    acc_chain.evolve(steps=acc_steps)
+    # ---- Run tuning loop and save best hyperparameters
+    # dt_loop()
+
+    # ---- Setup names and paths
+    steps = int(T / dt)
+    name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".", "_", 1)
+    model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
+    histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
+
+    # ---- Generate or load data
+    np.random.seed(seed)
+    chain = HeisenbergChain(N, dt=dt)
+
+    try:
+        with open(histories_path, 'rb') as f:
+            chain.history = pickle.load(f)
+    except FileNotFoundError:
+        chain.evolve(steps=steps)
+        with open(histories_path, 'wb') as f:
+            pickle.dump(chain.history, f)
+
+    # ---- Load best params from JSON if available
+    best_params_path = './examples/Heisenberg_Chain/trained_esns/best_params_by_dt.json'
+    try:
+        with open(best_params_path, 'r') as f:
+            all_best_params = json.load(f)
+        best_params = all_best_params.get(str(round(dt, 5)), {})
+        print("Found best parameters")
     
-    # Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed , n_trials=n_trials)
+    except (FileNotFoundError, json.JSONDecodeError):
+        best_params = {}
+
+    # ---- Manual fallback if no best params found
+    predictor = ESNPredictor(
+        steps=steps,
+        dt=dt,
+        N=N,
+        history_arrays=chain.history,
+        dims=chain.dims,
+        qubit=qubit,
+
+        reservoir_size=best_params.get('reservoir_size', 983),
+        spectral_radius=best_params.get('spectral_radius', 1.25033),
+        feedback=best_params.get('feedback', 1),
+        input_scaling=best_params.get('input_scaling', 0.546107),
+        ridge_param=best_params.get('ridge_param', 0.170278),
+        leak_rate=best_params.get('leak_rate', 0.946),
+        sparsity=best_params.get('sparsity', 0.2),
+
+        washout=washout,
+        batch_size=training_depth,
+        training_depth=training_depth,
+        model_path=model_path,
+        seed=seed,
+    )
+
+    # ---- Optional: train and save
+    if not os.path.exists(model_path):
+        predictor.train()
+        torch.save(predictor.esn, model_path)
+
+    #---- Optional: debug and plot
+    predictor.debug()
+    predictor.predict_and_plot(acc_z_history = acc_chain.history )
+
+    # ---- Optional: tuning (no-op if n_trials == 0)
+    study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
+    if n_trials == -1:
+        Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed, n_trials=0, plots = True)
+    elif n_trials > 0:
+        Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed, n_trials=n_trials, plots = True)
         

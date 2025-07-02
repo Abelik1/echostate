@@ -1,0 +1,58 @@
+{
+    "0.1": {
+        "reservoir_size": 935,
+        "spectral_radius": 1.2943054316071367,
+        "feedback": 1,
+        "leak_rate": 0.8550842204439641,
+        "input_scaling": 1.8532430014342387,
+        "ridge_param": 4.243290809917517e-05
+    },
+    "0.15": {
+        "reservoir_size": 285,
+        "spectral_radius": 1.2378355647060932,
+        "feedback": 1,
+        "leak_rate": 0.30379829106187833,
+        "input_scaling": 2.5326240354921055,
+        "ridge_param": 0.004773865793186245
+    },
+    "0.2": {
+        "reservoir_size": 770,
+        "spectral_radius": 1.3321389078776522,
+        "feedback": 1,
+        "leak_rate": 0.533294487070839,
+        "input_scaling": 1.79368643138359,
+        "ridge_param": 0.3986666587248284
+    },
+    "0.25": {
+        "reservoir_size": 983,
+        "spectral_radius": 1.2503343919226346,
+        "feedback": 1,
+        "leak_rate": 0.9460644687677119,
+        "input_scaling": 0.5461074415818828,
+        "ridge_param": 0.17027862666764343
+    },
+    "0.3": {
+        "reservoir_size": 977,
+        "spectral_radius": 1.2532131740971695,
+        "feedback": 1,
+        "leak_rate": 0.9401594845953255,
+        "input_scaling": 1.354135745811927,
+        "ridge_param": 0.008911543007249364
+    },
+    "0.35": {
+        "reservoir_size": 960,
+        "spectral_radius": 1.1422725609084523,
+        "feedback": 1,
+        "leak_rate": 0.956310987073195,
+        "input_scaling": 0.182470756064729,
+        "ridge_param": 0.48251736002197404
+    },
+    "0.4": {
+        "reservoir_size": 990,
+        "spectral_radius": 1.5881284661491333,
+        "feedback": 1,
+        "leak_rate": 0.9997330573806043,
+        "input_scaling": 4.907316112634106,
+        "ridge_param": 0.008875782497695852
+    }
+}
