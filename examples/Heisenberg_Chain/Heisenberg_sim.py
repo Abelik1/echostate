@@ -113,36 +113,36 @@ if __name__ == '__main__':
     errors = []
 
     # Load or generate all trajectories
-    # for dt in dt_list:
-    #     steps = int(T / dt)
-    #     print(f"Processing dt: {dt}")
-    #     np.random.seed(seed)
-    #     chain = HeisenbergChain(N, dt=dt)
-    #     name = f"Qbts{N}_dt{round(dt, 5)}".replace(".", "_", 1)
-    #     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
+    for dt in dt_list:
+        steps = int(T / dt)
+        print(f"Processing dt: {dt}")
+        np.random.seed(seed)
+        chain = HeisenbergChain(N, dt=dt)
+        name = f"Qbts{N}_dt{round(dt, 5)}".replace(".", "_", 1)
+        histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
 
-    #     # try:
-    #     #     with open(histories_path, 'rb') as f:
-    #     #         chain.history = pickle.load(f)
-    #     # except FileNotFoundError:
-    #     chain.evolve(steps=steps)
-    #     # with open(histories_path, 'wb') as f:
-    #     #     pickle.dump(chain.history, f)
+        # try:
+        #     with open(histories_path, 'rb') as f:
+        #         chain.history = pickle.load(f)
+        # except FileNotFoundError:
+        chain.evolve(steps=steps)
+        # with open(histories_path, 'wb') as f:
+        #     pickle.dump(chain.history, f)
 
-    #     z_vals = np.array([
-    #         float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
-    #         for rho in chain.history
-    #     ])
-    #     times = np.arange(len(z_vals)) * dt
-    #     all_z.append(z_vals)
-    #     all_times.append(times)
+        z_vals = np.array([
+            float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
+            for rho in chain.history
+        ])
+        times = np.arange(len(z_vals)) * dt
+        all_z.append(z_vals)
+        all_times.append(times)
     
     histories_path_time = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_alltimes.pkl'  
     histories_path_z = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_allz.pkl'  
-    # with open(histories_path_time, 'wb') as f:
-    #     pickle.dump(all_times, f)
-    # with open(histories_path_z, 'wb') as f:
-    #     pickle.dump(all_z, f)
+    with open(histories_path_time, 'wb') as f:
+        pickle.dump(all_times, f)
+    with open(histories_path_z, 'wb') as f:
+        pickle.dump(all_z, f)
         
     with open(histories_path_time, 'rb') as f:
         all_times = pickle.load(f)
