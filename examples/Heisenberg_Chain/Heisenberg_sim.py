@@ -20,7 +20,7 @@ class HeisenbergChain:
         # initial random pure state
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N))
         vec /= np.linalg.norm(vec)
-        print("Vec: ", vec[:self.N])
+        # print("Vec: ", vec[:self.N])
         psi = Qobj(vec, dims=[[2]*self.N, [1]*self.N])
         rho0 = psi * psi.dag()
 
@@ -102,54 +102,50 @@ if __name__ == '__main__':
     from scipy.interpolate import interp1d
     import pickle
     N = 5
-    T = 1000
+    T = 5000
     qubit = 0
-    dt_list = np.arange(0.01, 1.01, 0.01) 
-    seed = 31
+    # dt_list = np.arange(0.01, 1.8, 0.01) 
+    dt_list = [0.05,1.5]
+    seed = 3141
     target_points = 10_000
 
     all_z = []
     all_times = []
     errors = []
 
-    # Load or generate all trajectories
-    for dt in dt_list:
-        steps = int(T / dt)
-        print(f"Processing dt: {dt}")
-        np.random.seed(seed)
-        chain = HeisenbergChain(N, dt=dt)
-        name = f"Qbts{N}_dt{round(dt, 5)}".replace(".", "_", 1)
-        histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
-
-        # try:
-        #     with open(histories_path, 'rb') as f:
-        #         chain.history = pickle.load(f)
-        # except FileNotFoundError:
-        chain.evolve(steps=steps)
-        # with open(histories_path, 'wb') as f:
-        #     pickle.dump(chain.history, f)
-
-        z_vals = np.array([
-            float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
-            for rho in chain.history
-        ])
-        times = np.arange(len(z_vals)) * dt
-        all_z.append(z_vals)
-        all_times.append(times)
-    
     histories_path_time = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_alltimes.pkl'  
     histories_path_z = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_allz.pkl'  
-    with open(histories_path_time, 'wb') as f:
-        pickle.dump(all_times, f)
-    with open(histories_path_z, 'wb') as f:
-        pickle.dump(all_z, f)
-        
-    with open(histories_path_time, 'rb') as f:
-        all_times = pickle.load(f)
-    with open(histories_path_z, 'rb') as f:
-        all_z = pickle.load(f)
+
     
-            
+    # Load or generate all trajectories
+    try:
+        with open(histories_path_time, 'rb') as f:
+            all_times = pickle.load(f)
+        with open(histories_path_z, 'rb') as f:
+            all_z = pickle.load(f)
+    except:
+        for dt in dt_list:
+            steps = int(T / dt)
+            print(f"Processing dt: {dt}")
+            np.random.seed(seed)
+            chain = HeisenbergChain(N, dt=dt)
+            name = f"Qbts{N}_dt{round(dt, 5)}".replace(".", "_", 1)
+            histories_path = f'./examples/Heisenberg_Chain/cache/Historydata({seed})_{name}.pkl'
+            chain.evolve(steps=steps)
+
+            z_vals = np.array([
+                float(expect(sigmaz(), Qobj(rho, dims=chain.dims).ptrace(qubit)))
+                for rho in chain.history
+            ])
+            times = np.arange(len(z_vals)) * dt
+            all_z.append(z_vals)
+            all_times.append(times)
+    
+        with open(histories_path_time, 'wb') as f:
+            pickle.dump(all_times, f)
+        with open(histories_path_z, 'wb') as f:
+            pickle.dump(all_z, f)
+        
     # Use smallest dt as reference
     ref_z = all_z[0]
     ref_t = all_times[0]
@@ -175,9 +171,10 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.tight_layout()
     
+    num = 1
     plt.figure()
     plt.plot(all_times[0], all_z[0], label = f"Best {all_times[0][1]}")
-    plt.plot(all_times[80], all_z[80], label = f"Less {all_times[80][1]}")
+    plt.plot(all_times[num], all_z[num], label = f"Less {all_times[num][1]}")
     plt.legend()
     plt.show()
 

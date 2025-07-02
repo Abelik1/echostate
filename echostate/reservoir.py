@@ -32,6 +32,23 @@ class Reservoir:
         W = W * (spectral_radius / radius)
         return W
 
-    def update(self, x, u, leak_rate):
-        pre = self.W_in @ u + self.W @ x + self.W_bias.squeeze()
-        return (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
+    def update_batch(self, x, u, leak_rate):
+        """
+        Vectorized reservoir update for a batch of inputs, or a single 1-D x.
+        """
+        # Make sure bias is 1-D of length R
+        bias = self.W_bias.squeeze()            # shape (R,)
+
+        # If x is 1-D, treat it as batch of size 1
+        single = False
+        if x.dim() == 1:
+            x = x.unsqueeze(0)                  # (1, R) #TODO REMOVE ALL THESE CHECKS FOR LATER
+            u = u.unsqueeze(0)                  # (1, input_dim)
+            single = True
+
+        # now u @ W_in.T is (B, R), same for x @ W.T
+        pre = u @ self.W_in.T + x @ self.W.T + bias
+
+        x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
+
+        return x_new.squeeze(0) if single else x_new
