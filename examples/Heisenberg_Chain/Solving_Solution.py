@@ -96,7 +96,6 @@ class ESNPredictor:
 
                 # teacher-forced training data:
                 # input at t is z_t, target at t is z_{t+1}
-                # (we lose the last point as target)
                 X = torch.tensor(z_series[:-1], dtype=torch.float32)    .unsqueeze(-1)
                 Y = torch.tensor(z_series[1:],  dtype=torch.float32)    .unsqueeze(-1)
 
@@ -176,7 +175,6 @@ class ESNPredictor:
         print(f"MAE on test: {mae.item():.4f}")
         plt.show()
 
-
     def debug(self):
         """Check covariance conditioning after training."""
         self.esn.trainer.debug_covariance()
@@ -189,12 +187,12 @@ def Heisen_tune(predictor, study_name, washout, seed, n_trials, plots = False):
 
     # ------------ Run Optuna
     study = ESN.tune(input_list, target_list, n_trials=n_trials, direction="minimize",study_name = study_name, washout = washout, seed = seed,
-                    reservoir_limit = 900,
+                    reservoir_limit = [100,1500],
                     spectral_radius_limit = [0.1, 1.7],
                     feedback_limit = 1,
                     input_scaling_limit = [0.05, 5.0],
                     ridge_param_limit = [1e-7, 1],
-                    leak_rate_limit = [0.8, 1.0],
+                    leak_rate_limit = [0.2, 1.0],
                     sparsity_limit = 0.2,
                     )
     if plots:
@@ -203,7 +201,7 @@ def Heisen_tune(predictor, study_name, washout, seed, n_trials, plots = False):
         plot_parallel_coordinate(study).show()
         plot_slice(study).show()
         plot_contour(study).show()
-        plot_edf(study).show()
+        # plot_edf(study).show()
     # ----- Print best params
     print(dt)
     print("Best hyperparameters:", study.best_params)
@@ -261,13 +259,13 @@ if __name__ == '__main__':
     import numpy as np
 
     # ---- Initialization
-    T = 1_000
-    N = 5
+    T = 100
+    N = 10
     seed = 3141
     qubit = 0
     washout = 200
-    dt = 0.35
-    training_depth = 6
+    dt = 0.2
+    training_depth = 5
     n_trials = -1  # set > 0 to tune and save new best hyperparams
 
     np.random.seed(seed)
