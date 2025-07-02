@@ -20,7 +20,7 @@ class HeisenbergChain:
         # initial random pure state
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N))
         vec /= np.linalg.norm(vec)
-        print("Vec: ", vec[:self.N])
+        # print("Vec: ", vec[:self.N])
         psi = Qobj(vec, dims=[[2]*self.N, [1]*self.N])
         rho0 = psi * psi.dag()
 

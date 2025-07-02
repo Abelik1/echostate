@@ -177,20 +177,8 @@ def Heisen_tune(predictor, study_name, washout, seed, n_trials):
     print("Best hyperparameters:", study.best_params)
     print("Best MAE:", study.best_value)
     
- 
 
-if __name__ == '__main__':
-    # Example usage
-    T = 1_000
-    # steps = 10_000
-    N = 5
-    seed = 3141
-    qubit = 0
-    washout = 200
-    dt = 0.05
-    training_depth = 6
-    n_trials = 550
-    
+def dt_loop(dt):
     steps = int(T/dt)
     name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
     histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
@@ -204,7 +192,7 @@ if __name__ == '__main__':
             
         # simulate once or load from pickle
         name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
-        study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
+        study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{round(dt,5)}_dpth{training_depth}"
         history = []
         
         histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
@@ -263,4 +251,83 @@ if __name__ == '__main__':
         # ------Prepare dataset
         
         Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed , n_trials=n_trials)
+     
+   
+if __name__ == '__main__':
+    # Example usage
+    T = 1_000
+    # steps = 10_000
+    N = 5
+    seed = 3141
+    qubit = 0
+    washout = 200
+    dt = 0.05
+    training_depth = 6
+    n_trials = 0 
+    
+    dt_loop(dt)
+    # steps = int(T/dt)
+    # name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".","_",1)
+    # histories_path = f'./examples/Heisenberg_Chain/cache/Historydata_{name}.pkl'
+    # model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
+    # study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
+    
+    # np.random.seed(seed)
+    # chain = HeisenbergChain(N, dt=dt)
+    # chain.evolve(steps=steps)
+    
+    
+    # steps = int(T/dt)
+            
+    # # simulate once or load from pickle
+    
+    
+    # try:
+    #     with open(histories_path, 'rb') as f:
+    #         chain.history = pickle.load(f)
+    # except FileNotFoundError:
+    #     chain.evolve(steps=steps)
+    #     with open(histories_path, 'wb') as f:
+    #         pickle.dump(chain.history, f)
+    
+    
+    # chain.plot_spin_grid(400)
+    # print(chain.history[1][:10])
+    
+    # predictor = ESNPredictor(
+    #     steps=steps,
+    #     dt=dt,
+    #     N=N,
+    #     history_arrays=chain.history,
+    #     dims=chain.dims,
+    #     qubit=qubit,
+        
+    #     reservoir_size=747,
+    #     spectral_radius=0.5577,
+    #     feedback=2,
+    #     input_scaling=0.1341,
+    #     ridge_param=0.3755,
+    #     leak_rate=0.5122,
+    #     sparsity=0.44876,
+        
+    #     washout=washout,
+    #     batch_size=training_depth,
+    #     training_depth=training_depth,
+    #     model_path = model_path,
+    #     seed = seed,
+    # )
+
+    # # if not os.path.exists(model_path):
+    # #     predictor.train()
+    # #     torch.save(predictor.esn, model_path)
+    # # if not os.path.exists(model_path):
+    # #     predictor.train()
+    # #     torch.save(predictor.esn, model_path)
+        
+    # # predictor.debug()
+    # # predictor.predict_and_plot()
+    
+    # # ------Prepare dataset
+    
+    # Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed , n_trials=n_trials)
         
