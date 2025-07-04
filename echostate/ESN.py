@@ -58,6 +58,11 @@ class ESN(torch.nn.Module):
         X_batch: (B, T, base_input_dim)
         Y_batch: (B, T, output_dim)
         """
+         # allow either a torch.Tensor of shape (B,T,D) or a List[Tensor]
+        if isinstance(X_batch, list):
+            X_batch = torch.stack(X_batch, dim=0)
+            Y_batch = torch.stack(Y_batch, dim=0)
+            
         B, T, base_input_dim = X_batch.shape
         device = X_batch.device
         output_dim = self.output_dim
@@ -208,7 +213,10 @@ class ESN(torch.nn.Module):
                 seed=seed
             )
 
-            model.fit(input_list, target_list)
+            # stack per‐sequence lists into a single (B, T, D) tensor
+            X_batch = torch.stack(input_list, dim=0)    # (B, T, base_input_dim)
+            Y_batch = torch.stack(target_list, dim=0)   # (B, T, output_dim)
+            model.fit(X_batch, Y_batch)
             _, metrics = model.predict(input_list, target_list)
             return metrics['mae']
 
