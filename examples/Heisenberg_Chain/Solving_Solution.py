@@ -12,7 +12,7 @@ from echostate import ESN  # <-- our new ESN module
 from .Heisenberg_sim import HeisenbergChain
 from echostate.utils import mean_absolute_error
 
-device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class ESNPredictor:
@@ -193,7 +193,7 @@ def Heisen_tune(predictor, study_name, washout, seed, n_trials, plots = False):
                     input_scaling_limit = [0.05, 5.0],
                     ridge_param_limit = [1e-7, 1],
                     leak_rate_limit = [0.2, 1.0],
-                    sparsity_limit = 0.2,
+                    sparsity_limit = [0.1,1.0],
                     )
     if plots:
         plot_optimization_history(study).show()
@@ -261,12 +261,12 @@ if __name__ == '__main__':
     # ---- Initialization
     T = 100
     N = 10
-    seed = 3141
+    seed = 31415
     qubit = 0
     washout = 200
     dt = 0.2
     training_depth = 5
-    n_trials = -1  # set > 0 to tune and save new best hyperparams
+    n_trials = -1  # set > 0 to tune and save new best hyperparams ( -1 just prints current best)
 
     np.random.seed(seed)
     
@@ -296,7 +296,7 @@ if __name__ == '__main__':
             pickle.dump(chain.history, f)
 
     # ---- Load best params from JSON if available
-    best_params_path = './examples/Heisenberg_Chain/trained_esns/best_params_by_dt.json'
+    best_params_path = f'./examples/Heisenberg_Chain/trained_esns/best{seed}_Qbts{N}_params_by_dt.json'
     try:
         with open(best_params_path, 'r') as f:
             all_best_params = json.load(f)
