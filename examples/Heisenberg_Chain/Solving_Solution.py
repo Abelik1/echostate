@@ -117,26 +117,31 @@ class ESNPredictor:
         if self.test_history is None:
             raise ValueError("No test history provided.")
 
-        # If your test_history is already ⟨σ_z⟩ values, then this is fine:
-        z_test = np.asarray(self.test_history)
+        # Use test history directly if it's already ⟨σ_z⟩ values or reduced density matrices
+        if isinstance(self.test_history[0], (float, np.floating, np.complexfloating)):
+            z_test = np.asarray(self.test_history)
+        else:
+            # Convert reduced density matrices to ⟨σ_z⟩ values
+            z_test = np.asarray([
+                            float(expect(sigmaz(), Qobj(rho, dims=[[2], [2]])))
+                            for rho in self.test_history
+        ])
 
-        # --- build high‐res reference if given (same as old code)
+        # --- build high‐res reference if given
         if acc_history is not None and acc_chain is not None:
-            acc_z = [float(expect(sigmaz(),
-                                Qobj(rho, dims=acc_chain.dims).ptrace(self.qubit)))
+            acc_z = [float(expect(sigmaz(), Qobj(rho, dims=[[2], [2]])))
                     for rho in acc_history]
             acc_dt = acc_chain.dt
 
-        # --- build X_test exactly as you did (batch=1, seq length = len(z_test)-1)
-        device = next(self.esn.parameters()).device
-        X_test = torch.tensor(
-            z_test[:-1], dtype=torch.float32, device=device
-        ).unsqueeze(-1).unsqueeze(0)
+        # --- build X_test (batch=1, seq length = len(z_test)-1)
+        
+        X_test = torch.tensor(z_test[:-1], dtype=torch.float32, device=device).unsqueeze(-1).unsqueeze(0)
         preds = self.esn.predict(X_test)[0].cpu().numpy().flatten()
 
-        # --- true trajectory (after washout) just like before
+        # --- true trajectory (after washout)
+        print("Z_test:", z_test[:20])
         true = z_test[self.washout+1 : self.washout+1+len(preds)]
-
+        print("True:", true[:20])
         # --- time axes
         coarse_t = np.arange(len(preds)) * self.dt
         true_t   = np.arange(len(true)) * self.dt
@@ -145,40 +150,43 @@ class ESNPredictor:
         plt.figure(figsize=(8, 4))
 
         if acc_history is not None and acc_chain is not None:
-            # same offset logic as old
             washout_acc_steps = int((self.washout * self.dt) / acc_dt)
-            # plus one coarse‐step offset like you had
             extra = int(self.dt / acc_dt)
             acc_z_trim = acc_z[washout_acc_steps + extra : washout_acc_steps + extra + len(preds)]
             acc_t = np.arange(len(acc_z_trim)) * acc_dt
+            print("acc_z: ",acc_z[:20])
             plt.plot(acc_t, acc_z_trim, "-o", label="Fully Accurate", markersize=1)
-
+            
+        print("preds: ", preds[:20])
         plt.plot(coarse_t, preds, label='Predicted ⟨σ_z⟩')
         plt.plot(true_t, true,   label='True ⟨σ_z⟩')
 
-        # restore your zoom window:
-        plt.xlim(800, 900)
-
+        # plt.xlim(800, 900)
         plt.xlabel("Time")
         plt.ylabel("⟨σ_z⟩")
         plt.title('ESN Prediction of Single‐Qubit Dynamics')
         plt.legend()
 
-        # save exactly like old
         out_dir = './examples/Heisenberg_Chain/cache'
         os.makedirs(out_dir, exist_ok=True)
-        # embed the qubit in the filename as you had with the regex
         fname = re.sub(r"(Qbts)", r"\1({})".format(self.qubit + 1),
                     f"Errors_{name}.pdf")
         plt.savefig(f"{out_dir}/{fname}", format="pdf")
 
-        # MAE
         mae = mean_absolute_error(
             torch.tensor(preds), torch.tensor(true)
         )
         print(f"MAE on test: {mae.item():.4f}")
 
+        # plt.show()
+        
+        plt.figure()
+        plt.plot(z_test, label='Z test raw')
+        plt.plot(np.arange(self.washout + 1, self.washout + 1 + len(preds)), preds, label='Predicted (aligned)')
+        plt.legend()
+        plt.title("Raw history and prediction overlay")
         plt.show()
+
 
     def debug(self):
         """Check covariance conditioning after training."""
@@ -262,6 +270,7 @@ def dt_loop():
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(best_params_dict, f, indent=4)
+    
      
    
 if __name__ == '__main__':
@@ -273,7 +282,7 @@ if __name__ == '__main__':
     qubit = 0
     washout = 75
     dt = 0.15
-    training_depth = 60
+    training_depth = 5
     n_trials = -1  # no tuning by default
 
     np.random.seed(seed)
@@ -281,7 +290,7 @@ if __name__ == '__main__':
     acc_dt = 0.05
     acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
     acc_steps = int(T / acc_dt)
-    acc_chain.evolve(acc_steps)
+    acc_chain.evolve(acc_steps, store_reduced=True)
 
     # simulate or load low-res history
     steps = int(T / dt)
@@ -291,9 +300,11 @@ if __name__ == '__main__':
     try:
         with open(histories_path, 'rb') as f:
             z_history = pickle.load(f)
+        print("Loading z history...")
     except FileNotFoundError:
+        np.random.seed(seed)
         chain = HeisenbergChain(N, qubit, dt=dt)
-        chain.evolve(steps)
+        chain.evolve(steps, store_reduced= True)
         z_history = chain.get_sz()
         os.makedirs(os.path.dirname(histories_path), exist_ok=True)
         with open(histories_path, 'wb') as f:
@@ -308,7 +319,7 @@ if __name__ == '__main__':
         best = all_best.get(str(round(dt,5)), {})
     except (FileNotFoundError, json.JSONDecodeError):
         best = {}
-
+ 
     predictor = ESNPredictor(
         steps=steps,
         dt=dt,
@@ -328,7 +339,7 @@ if __name__ == '__main__':
         model_path= model_path,
         seed=seed,
     )
-
+    
     
     
     study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{dt}_dpth{training_depth}"
@@ -337,10 +348,12 @@ if __name__ == '__main__':
         Heisen_tune(predictor, study_name= study_name, washout=washout, seed=seed, n_trials=max(0, n_trials), plots=False)
     else:
         if not os.path.exists(model_path):
+            print("Training ESN...")
             predictor.train()
             torch.save(predictor.esn, model_path)
 
         predictor.debug()
+        print("Plotting..")
         predictor.predict_and_plot(acc_history=acc_chain.get_sz(), acc_chain=acc_chain, name=name)
 
         
