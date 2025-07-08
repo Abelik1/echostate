@@ -10,19 +10,20 @@ class Reservoir:
                  sparsity,
                  input_scaling,
                  bias_scaling,
-                 seed=None):
+                 seed=None,
+                 device=torch.device("cpu")):
+        
         if seed is not None:
             torch.manual_seed(seed)
-
+        print(device)
+        self.device= device
         self.reservoir_size = reservoir_size
         self.output_dim = output_dim
-        # input weights and bias
-        self.W_in = torch.empty(reservoir_size, input_dim).uniform_(-input_scaling, input_scaling)
-        self.W_bias = torch.empty(reservoir_size, 1).uniform_(-bias_scaling, bias_scaling)
-        # recurrent reservoir
-        self.W = self._initialize_reservoir(reservoir_size,
-                                            spectral_radius,
-                                            sparsity)
+
+        # Move weights to device after creation
+        self.W_in = torch.empty(reservoir_size, input_dim).uniform_(-input_scaling, input_scaling).to(self.device)
+        self.W_bias = torch.empty(reservoir_size, 1).uniform_(-bias_scaling, bias_scaling).to(self.device)
+        self.W = self._initialize_reservoir(reservoir_size, spectral_radius, sparsity).to(self.device)
 
     def _initialize_reservoir(self, size, spectral_radius, sparsity):
         W = torch.randn(size, size)
@@ -37,7 +38,9 @@ class Reservoir:
         Vectorized reservoir update for a batch of inputs, or a single 1-D x.
         """
         # Make sure bias is 1-D of length R
-        bias = self.W_bias.squeeze()            # shape (R,)
+        x = x.to(self.device)
+        u = u.to(self.device)
+        bias = self.W_bias.squeeze().to(self.device)            # shape (R,)
 
         # If x is 1-D, treat it as batch of size 1
         single = False

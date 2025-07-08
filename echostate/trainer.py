@@ -2,15 +2,18 @@ import torch
 import numpy as np
 
 class Trainer:
-    def __init__(self, ridge_param=1e-6, learning_algo="inv"):
+    def __init__(self, ridge_param=1e-6, learning_algo="inv" , device=torch.device("cpu"),):
         self.ridge_param = ridge_param
         self.learning_algo = learning_algo
         self.xTx = None
         self.xTy = None
+        self.device = device
 
     def fit(self, X, Y):
         # accumulate covariance
         Xt = X.T
+        X = X.to(self.device)
+        Y = Y.to(self.device)
         self.xTx = Xt @ X
         self.xTy = Xt @ Y
         I = torch.eye(self.xTx.shape[0], device=self.xTx.device)

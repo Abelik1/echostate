@@ -6,6 +6,7 @@ from .utils import mean_absolute_error, mean_squared_error
 
 class ESN(torch.nn.Module):
     def __init__(self,
+                 device=torch.device("cpu"),
                  base_input_dim=1,
                  reservoir_size=100,
                  output_dim=1,
@@ -21,6 +22,7 @@ class ESN(torch.nn.Module):
                  batch_size=1,
                  seed=None):
         super().__init__()
+        self.device = device
         self.base_input_dim = base_input_dim
         self.output_dim = output_dim
         self.feedback = feedback
@@ -44,10 +46,12 @@ class ESN(torch.nn.Module):
                                    sparsity,
                                    input_scaling,
                                    bias_scaling,
-                                   seed)
+                                   seed,
+                                   device=self.device)
         self.trainer = Trainer(ridge_param,
-                               learning_algo)
+                               learning_algo, device = self.device)
         self.W_out = None
+        
 
     def reset_state(self):
         # return fresh reservoir state
@@ -91,7 +95,7 @@ class ESN(torch.nn.Module):
             x = self.reservoir.update_batch(x, u, self.leak_rate)
 
             if t >= self.washout:
-                xb = torch.cat([x, torch.ones(B, 1, device=device)], dim=1)  # bias
+                xb = torch.cat([x, torch.ones(B, 1, device=self.device)], dim=1)  # bias
                 state_list.append(xb)
                 target_list.append(Y_batch[:, t, :])
 
@@ -106,15 +110,14 @@ class ESN(torch.nn.Module):
         Returns Tensor (T - washout, output_dim).
         """
         T = inputs.shape[0]
-        device = inputs.device
 
         # start with a 1-D reservoir state
-        x = torch.zeros(self.reservoir.reservoir_size, device=device)
+        x = torch.zeros(self.reservoir.reservoir_size, device=self.device)
         prev_outputs = []
         outputs = []
 
         for t in range(T):
-            u_base = inputs[t]                               # (base_input_dim,)
+            u_base = inputs[t].to(self.device)                              # (base_input_dim,)
             # --- build feedback portion ---
             if self.feedback > 0:
                 fb = []
@@ -122,7 +125,7 @@ class ESN(torch.nn.Module):
                     if len(prev_outputs) >= j:
                         fb.append(prev_outputs[-j])         # each is (output_dim,)
                     else:
-                        fb.append(torch.zeros(self.output_dim, device=device))
+                        fb.append(torch.zeros(self.output_dim, device=self.device))
                 u = torch.cat([u_base, *fb], dim=0)         # (input_dim,)
             else:
                 u = u_base                                  # (input_dim,)
@@ -131,7 +134,7 @@ class ESN(torch.nn.Module):
             x = self.reservoir.update_batch(x, u, self.leak_rate)  # returns (R,)
 
             # readout
-            bias = torch.tensor([1.0], device=device)      # shape (1,)
+            bias = torch.tensor([1.0], device=self.device)      # shape (1,)
             xb   = torch.cat([x, bias], dim=0)             # shape (R+1,)
             y    = self.W_out @ xb                         # (output_dim,)
             prev_outputs.append(y)
@@ -165,9 +168,11 @@ class ESN(torch.nn.Module):
     @staticmethod
     def tune(input_list,
          target_list,
+         device=torch.device("cpu"),
          n_trials=50,
          direction="minimize",
          study_name=None,
+         study_loc = None,
          washout=0,
          seed=None,
          reservoir_limit=200,
@@ -197,6 +202,7 @@ class ESN(torch.nn.Module):
 
 
             model = ESN(
+                device=device,
                 base_input_dim=input_list[0].shape[1],
                 reservoir_size=reservoir_size,
                 output_dim=target_list[0].shape[1],
@@ -223,7 +229,7 @@ class ESN(torch.nn.Module):
         study = optuna.create_study(
             direction=direction,
             study_name=study_name,
-            storage=f"sqlite:///examples/Heisenberg_Chain/trained_esns/{study_name}.db" if study_name else None,
+            storage=f"sqlite:///{study_loc}{study_name}.db" if study_name else None,
             load_if_exists=True
         )
         study.optimize(objective, n_trials=n_trials, **study_kwargs)

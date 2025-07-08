@@ -43,16 +43,20 @@ class HeisenbergChain:
     def evolve(self, steps: int, store_reduced=False):
         sz_op = tensor(*[sigmaz() if idx == self.k else qeye(2) for idx in range(self.N)])
 
-        # Store initial state
+        # Initialize Qobj from state vector
         psi_qobj = Qobj(self.psi, dims=[[2]*self.N, [1]*self.N])
+
+        # Record initial value
         if store_reduced:
+            # Store reduced density matrix ρ_k of target qubit
             rho_k = psi_qobj.ptrace(self.k)
             self.sz_history.append(rho_k.full())
         else:
+            # Store expectation value ⟨σ_z⟩ for target qubit
             val = expect(sz_op, psi_qobj)
             self.sz_history.append(val)
 
-        # Then evolve
+        # Evolve state over 'steps' time steps
         for _ in range(steps):
             psi_qobj = self.U * psi_qobj
             self.psi = psi_qobj.full().flatten()
