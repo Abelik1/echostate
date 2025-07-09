@@ -1,0 +1,12 @@
+{
+    "0.2": {
+        "reservoir_size": 308,
+        "spectral_radius": 1.1125071257209171,
+        "feedback": 2,
+        "sparsity": 0.20994024396990368,
+        "leak_rate": 0.5146695884442608,
+        "input_scaling": 0.950067489378427,
+        "bias_scaling": 0.38792647012521475,
+        "ridge_param": 0.028685438846027374
+    }
+}
