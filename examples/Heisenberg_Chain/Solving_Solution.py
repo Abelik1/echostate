@@ -7,7 +7,7 @@ from echostate import ESN  # <-- our new ESN module
 from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 print(torch.__version__)
 print(torch.cuda.is_available())
@@ -191,8 +191,8 @@ class ESNPredictor:
             plt.plot(acc_t, acc_z_trim, "-o", label=f"Fully Accurate dt={acc_dt}", markersize=1)
             
         print("preds: ", preds[:20])
-        plt.plot(coarse_t, preds, label='Predicted ⟨σ_z⟩')
-        plt.plot(true_t, true,   label='True ⟨σ_z⟩')
+        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "3")
+        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "2")
 
         # plt.xlim(800, 900)
         plt.xlabel("Time")
@@ -233,19 +233,36 @@ class ESNPredictor:
 
 def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, plots = False):
     from optuna.visualization import plot_optimization_history, plot_param_importances, plot_parallel_coordinate, plot_slice, plot_contour, plot_edf
+    import optuna
     best_params_dict = {}
     input_list, target_list = predictor._build_dataset()
 
     # ------------ Run Optuna
-    study = ESN.tune(input_list, target_list, n_trials=n_trials, direction="minimize",study_name = study_name, study_loc= study_loc, washout = washout, seed = seed,
-                    reservoir_limit = [100,1500],
-                    spectral_radius_limit = [0.1, 1.7],
-                    feedback_limit = 1,
-                    input_scaling_limit = [0.05, 5.0],
-                    ridge_param_limit = [1e-7, 1],
-                    leak_rate_limit = [0.2, 1.0],
-                    sparsity_limit = [0.1,1.0],
-                    )
+    try:
+        study = ESN.tune(input_list, target_list, n_trials=n_trials, direction="minimize",study_name = study_name, study_loc= study_loc, washout = washout, seed = seed,
+                        reservoir_limit = [100,800],
+                        spectral_radius_limit = [0.1, 1.7],
+                        feedback_limit = [1 ,2],
+                        input_scaling_limit = [0.05, 5.0],
+                        ridge_param_limit = [1e-7, 1],
+                        leak_rate_limit = [0.2, 1.0],
+                        sparsity_limit = [0.1,1.0],
+                        bias_scaling_limit= [0.1, 0.8]
+                        )
+    except KeyboardInterrupt:
+        print("Interrupted! Loading best trial so far...")
+        # Save all best parameters to JSON
+        study = optuna.load_study(study_name=study_name, storage=f"sqlite:///{study_loc}/{study_name}.db")
+        best_params_dict[str(round(dt, 5))] = study.best_params
+        
+        output_path = f'./examples/Heisenberg_Chain/trained_esns/bestparams_{name}.json'
+        print(output_path)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(best_params_dict, f, indent=4)
+            print("Saved Best parameters")
+        return study
+    
     if plots:
         plot_optimization_history(study).show()
         plot_param_importances(study).show()
@@ -316,7 +333,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     # Setup parameters
     T = 100
-    N = 10
+    N = 5
     seed = 31415
     qubit = 0
     washout = 75
@@ -376,6 +393,8 @@ if __name__ == '__main__':
         best = all_best.get(str(round(dt,5)), {})
         if best != {}:
             print("Found best parameters")
+        print(best)
+        
     except (FileNotFoundError, json.JSONDecodeError):
         best = {}
  
