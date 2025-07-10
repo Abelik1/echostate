@@ -11,50 +11,21 @@ class Trainer:
         self.xTy = None
         self._I = None
 
-    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
-        # X: (B, T, features) or (N, features)
+    def fit(self, X, Y):
         X = X.to(self.device)
         Y = Y.to(self.device)
+        I = torch.eye(X.shape[1], device=self.device)
+        self.xTx = X.T @ X
+        self.xTy = X.T @ Y
 
-        # flatten (B,T) → (B*T)
-        if X.dim() == 3:
-            B, T, D = X.shape
-            X_flat = X.reshape(B * T, D)
-            Y_flat = Y.reshape(B * T, -1)
-        else:
-            X_flat, Y_flat = X, Y
-
-        # accumulate covariance
-        Xt = X_flat.transpose(0, 1)       # (features, N)
-        self.xTx = Xt @ X_flat            # (features, features)
-        self.xTy = Xt @ Y_flat            # (features, output_dim)
-
-        # cache identity
-        n = self.xTx.shape[0]
-        if self._I is None or self._I.shape[0] != n:
-            self._I = torch.eye(n, device=self.device, dtype=self.xTx.dtype)
-
-            
-        A = self.xTx + self.ridge_param * self._I
-
-        # solve A W = xTy
-        if self.learning_algo == 'cholesky':
-            # try Cholesky (fast & stable if A is SPD)
-            try:
-                chol = torch.linalg.cholesky(A)
-                W = torch.cholesky_solve(self.xTy, chol)
-            except RuntimeError:
-                # fallback to general solver if not PD
-                W = torch.linalg.solve(A, self.xTy)
-        elif self.learning_algo == 'solve':
-            # always use general solver
-            W = torch.linalg.solve(A, self.xTy)
-        elif self.learning_algo == 'inv':
-            W = (torch.linalg.inv(self.xTx + self.ridge_param * self._I) @ self.xTy)
+        if self.learning_algo == "inv":
+            return (torch.linalg.inv(self.xTx + self.ridge_param * I) @ self.xTy).T
+        elif self.learning_algo == "cholesky":
+            chol = torch.linalg.cholesky(self.xTx + self.ridge_param * I)
+            return torch.cholesky_solve(self.xTy, chol).T
         else:
             raise NotImplementedError(f"Learning algorithm '{self.learning_algo}' not implemented.")
 
-        return W.T  # (output_dim, features)
 
     def debug_covariance(self):
         s = torch.linalg.svdvals(self.xTx)

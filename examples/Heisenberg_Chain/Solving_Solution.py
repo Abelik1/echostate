@@ -8,7 +8,7 @@ from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
 
-device = torch.device("cuda"  if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu"  if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {device}")
 print(torch.__version__)
@@ -39,6 +39,7 @@ class ESNPredictor:
                  leak_rate: float = 0.9,
                  sparsity: float = 1.0,
                  feedback: int = 1,
+                 bias_scaling: float = 0.2,
                  washout: int = 0,
                  batch_size: int = 1,
                  training_depth: int = 1,
@@ -68,6 +69,7 @@ class ESNPredictor:
                 input_scaling=input_scaling,
                 ridge_param=ridge_param,
                 leak_rate=leak_rate,
+                bias_scaling = bias_scaling,
                 washout=washout,
                 batch_size=batch_size,
                 seed=seed,
@@ -189,7 +191,7 @@ class ESNPredictor:
             extra = int(self.dt / acc_dt)
             acc_z_trim = acc_z[washout_acc_steps + extra : washout_acc_steps + extra + len(preds)]
             acc_t = np.arange(len(acc_z_trim)) * acc_dt
-            print("acc_z: ",acc_z[:20])
+            # print("acc_z: ",acc_z[:20])
             plt.plot(acc_t, acc_z_trim, "-o", label=f"Fully Accurate dt={acc_dt}", markersize=1)
             
         # print("preds: ", preds[:20])
@@ -292,15 +294,16 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, plots
     # ------------ Run Optuna
     try:
         study = ESN.tune(input_list, target_list, n_trials=n_trials, direction="minimize",study_name = study_name, study_loc= study_loc, washout = washout, seed = seed,
-                        reservoir_limit = [100,1500],
-                        spectral_radius_limit = [0.1, 1.7],
-                        feedback_limit = [1 ,2],
+                        reservoir_limit = [200,1500],
+                        spectral_radius_limit = [0.1, 2],
+                        feedback_limit = [1,2],
                         input_scaling_limit = [0.05, 5.0],
-                        ridge_param_limit = [1e-7, 1],
+                        ridge_param_limit = [1e-8, 1],
                         leak_rate_limit = [0.2, 1.0],
                         sparsity_limit = [0.1,1.0],
-                        bias_scaling_limit= [0.1, 0.8],
+                        bias_scaling_limit= [0.2,0.8],
                         device = device,
+                        learning_algo="inv"
                         )
     except KeyboardInterrupt:
         print("Interrupted! Loading best trial so far...")
@@ -392,11 +395,11 @@ if __name__ == '__main__':
     washout = 75
     dt = 0.2
     training_depth = 50
-    n_trials = 50  # no tuning by default
+    n_trials = -1  # no tuning by default
 
     
 
-    for N in [5]:
+    for N in [2,3,4,5,6,7,8,10]:
         print(f"Solving N: {N}")
         np.random.seed(seed)
         # high-resolution reference
@@ -462,13 +465,14 @@ if __name__ == '__main__':
             N=N,
             qubit=qubit,
             history_values=z_history,
-            reservoir_size=best.get('reservoir_size', 578),
+            reservoir_size=best.get('reservoir_size', 900),
             spectral_radius=best.get('spectral_radius', 1.25033),
             input_scaling=best.get('input_scaling', 0.546107),
             ridge_param=best.get('ridge_param', 0.170278),
             leak_rate=best.get('leak_rate', 0.946),
             sparsity=best.get('sparsity', 0.2),
             feedback=best.get('feedback', 1),
+            bias_scaling=best.get("bias_scaling", 0.45),
             washout=washout,
             batch_size=training_depth,
             training_depth=training_depth,
