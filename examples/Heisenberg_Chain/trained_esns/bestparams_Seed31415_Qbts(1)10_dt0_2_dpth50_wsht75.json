@@ -1,5 +1,6 @@
 {
     "0.2": {
+        "reservoir_size": 900,
         "spectral_radius": 1.2754928357657334,
         "feedback": 1,
         "sparsity": 0.5125611073302454,

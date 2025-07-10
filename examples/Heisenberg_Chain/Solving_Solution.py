@@ -192,13 +192,13 @@ class ESNPredictor:
             acc_z_trim = acc_z[washout_acc_steps + extra : washout_acc_steps + extra + len(preds)]
             acc_t = np.arange(len(acc_z_trim)) * acc_dt
             # print("acc_z: ",acc_z[:20])
-            plt.plot(acc_t, acc_z_trim, "-o", label=f"Fully Accurate dt={acc_dt}", markersize=1)
+            plt.plot(acc_t, acc_z_trim, label=f"Fully Accurate dt={acc_dt}")
             
         # print("preds: ", preds[:20])
-        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "3")
-        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "2")
+        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "1")
+        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "5")
 
-        # plt.xlim(800, 900)
+        plt.xlim(50, 70)
         plt.xlabel("Time")
         plt.ylabel("⟨σ_z⟩")
         plt.title(f'ESN Prediction of Single‐Qubit({self.qubit}){self.N} at T:{T} and dt:{self.dt} Dynamics')
@@ -206,8 +206,7 @@ class ESNPredictor:
 
         out_dir = './examples/Heisenberg_Chain/cache'
         os.makedirs(out_dir, exist_ok=True)
-        fname = re.sub(r"(Qbts)", r"\1({})".format(self.qubit + 1),
-                    f"Errors_{name}.pdf")
+        fname = f"Errors_{name}.pdf"
         plt.savefig(f"{out_dir}/{fname}", format="pdf")
 
         mae = mean_absolute_error(
@@ -232,7 +231,7 @@ class ESNPredictor:
 
 
 
-
+#region EXAMPLE
 # -------------Example CASE------------------------------------------
 def plot_hyperparams_vs_N(perm_dir):
     import re
@@ -384,7 +383,7 @@ def dt_loop(): # OUtdated
     with open(output_path, "w") as f:
         json.dump(best_params_dict, f, indent=4)
     
-     
+#region CONTROL  
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     # Setup parameters
@@ -399,22 +398,25 @@ if __name__ == '__main__':
 
     
 
-    for N in [2,3,4,5,6,7,8,10]:
-        print(f"Solving N: {N}")
+    for N in [5]:
+        print(f"Solving N: {N}") 
         np.random.seed(seed)
         # high-resolution reference
         acc_dt = 0.05
         acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
         acc_steps = int(T / acc_dt)
-        acc_chain.evolve(acc_steps, store_reduced=True)
-        
-        
+        acc_chain.evolve(acc_steps, store_reduced=False)
+        acc_chain.plot()
+        plt.show()
         # --- Simulation setup ---
         steps = int(T / dt)
         fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
         qubit_tag = f"Qbts({qubit + 1}){N}"
+        
+        
         name = f"Seed{seed}_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
-
+        
+        
         # --- File locations ---
         cache_dir = "./examples/Heisenberg_Chain/cache/"
         perm_dir = "./examples/Heisenberg_Chain/trained_esns/"
@@ -458,7 +460,7 @@ if __name__ == '__main__':
             
         except (FileNotFoundError, json.JSONDecodeError):
             best = {}
-    
+        
         predictor = ESNPredictor(
             steps=steps,
             dt=dt,
@@ -472,7 +474,7 @@ if __name__ == '__main__':
             leak_rate=best.get('leak_rate', 0.946),
             sparsity=best.get('sparsity', 0.2),
             feedback=best.get('feedback', 1),
-            bias_scaling=best.get("bias_scaling", 0.45),
+            # bias_scaling=best.get("bias_scaling", 0.45),
             washout=washout,
             batch_size=training_depth,
             training_depth=training_depth,
@@ -484,7 +486,7 @@ if __name__ == '__main__':
         
         # optional tuning
         if n_trials > 0:
-            Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=max(0, n_trials), plots=False)
+            Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=n_trials, plots=False)
         elif n_trials == 0:
             Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=0, plots=True)
         else:
