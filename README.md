@@ -346,3 +346,26 @@ This script-level function invokes the built-in `ESN.tune()` method using [Optun
 
 You can customize the number of trials, search bounds, and direction (minimize/maximize) as needed.
 
+
+### SOME NOTES
+
+Graphing names:
+Errors_Seed{}_T{}_Qbts({}){}_dt{}_dpth{}.pdf
+-They should be scattering plots, saving without washout. Should probably save the prob plots
+-In the plot should include what fidelity high res is
+
+Cache naming
+Historydata_Seed{}_T{}_Qbts({}){}_dt{}.pkl
+Historydata_Seed{}_T{}_Qbts(ALL){}_dt{}.pkl
+
+Trained_esns cache
+bestparams_Seed{}_Qbts({}){}_dt{}_dpth{}_wsht{}.json
+
+trainedmodel_Seed{}_Qbts({}){}_dt{}_dpth{}_wsht{}.pt
+
+
+esnStudy
+esnStudy_Seed{}_Qbts({}){}_dt{}_dpth{}_wsht{}.pt
+
+Where all 
+dt{round(dt,5)} has some attribute to change .replace('.', '_', 1)
