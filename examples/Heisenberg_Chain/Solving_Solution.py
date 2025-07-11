@@ -137,7 +137,7 @@ class ESNPredictor:
         
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
         self.esn.fit(inputs, targets)
-
+#region Plotting
     def predict_and_plot(self, acc_history=None, acc_chain=None, name="test"):
         """
         Predict with ESN on self.test_history, then plot true vs predicted
@@ -195,8 +195,8 @@ class ESNPredictor:
             plt.plot(acc_t, acc_z_trim, label=f"Fully Accurate dt={acc_dt}")
             
         # print("preds: ", preds[:20])
-        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "1")
-        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "5")
+        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "5")
+        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "1")
 
         plt.xlim(50, 70)
         plt.xlabel("Time")
@@ -389,25 +389,23 @@ if __name__ == '__main__':
     # Setup parameters
     T = 100
     N = 5
-    seed = 31415
+    seed = 1111
     qubit = 0
     washout = 75
     dt = 0.2
     training_depth = 50
     n_trials = -1  # no tuning by default
 
-    
-
-    for N in [5]:
+    for N in [2,3,4,5,6,7,8,9,10]:
         print(f"Solving N: {N}") 
         np.random.seed(seed)
         # high-resolution reference
         acc_dt = 0.05
         acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
         acc_steps = int(T / acc_dt)
-        acc_chain.evolve(acc_steps, store_reduced=False)
-        acc_chain.plot()
-        plt.show()
+        acc_chain.evolve(acc_steps, store_reduced=True)
+        # acc_chain.plot()
+        # plt.show()
         # --- Simulation setup ---
         steps = int(T / dt)
         fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
@@ -431,7 +429,8 @@ if __name__ == '__main__':
         best_params_path = f"{perm_dir}bestparams_{name}.json"
 
         # Optuna study name
-        study_name = f"esnStudy_{name}"
+        st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+        study_name = f"esnStudy_{st_name}"
         
         try:
             with open(histories_path, 'rb') as f:
@@ -451,6 +450,9 @@ if __name__ == '__main__':
         # Load or fallback best params
         
         try:
+            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+            best_params_path = f"{perm_dir}bestparams_{param_name}.json"
+            
             with open(best_params_path, 'r') as f:
                 all_best = json.load(f)
             best = all_best.get(str(round(dt,5)), {})
