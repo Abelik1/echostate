@@ -8,7 +8,7 @@ from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
 
-device = torch.device("cpu"  if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda"  if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {device}")
 print(torch.__version__)
@@ -85,7 +85,7 @@ class ESNPredictor:
         self.histories = []
         # History cache follows ALL-qubit format
         fmt_dt_val = str(round(self.dt, 5)).replace(".", "_", 1)
-        qubit_tag = f"Qbts(ALL){self.N}"
+        qubit_tag = f"Qbts(dpth{training_depth}){self.N}"
         cache_name = f"Historydata_Seed{seed}_T{T}_{qubit_tag}_dt{fmt_dt_val}.pkl"
         cache_path = os.path.join(cache_dir, cache_name)
 
@@ -293,10 +293,10 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, plots
     # ------------ Run Optuna
     try:
         study = ESN.tune(input_list, target_list, n_trials=n_trials, direction="minimize",study_name = study_name, study_loc= study_loc, washout = washout, seed = seed,
-                        reservoir_limit = [200,1500],
+                        reservoir_limit = [700,1000],
                         spectral_radius_limit = [0.1, 2],
-                        feedback_limit = [1,2],
-                        input_scaling_limit = [0.05, 5.0],
+                        feedback_limit = 1,
+                        input_scaling_limit = [1.0, 3.0],
                         ridge_param_limit = [1e-8, 1],
                         leak_rate_limit = [0.2, 1.0],
                         sparsity_limit = [0.1,1.0],
@@ -389,14 +389,14 @@ if __name__ == '__main__':
     # Setup parameters
     T = 100
     N = 5
-    seed = 1111
+    seed = 31415
     qubit = 0
     washout = 75
     dt = 0.2
-    training_depth = 50
-    n_trials = 200 # no tuning by default
+    training_depth = 300
+    n_trials = 100 # no tuning by default
 
-    for N in [2,3,4,5,6,7,8,9,10]:
+    for N in [4]:
 
         print(f"Solving N: {N}") 
         np.random.seed(seed)
@@ -432,7 +432,7 @@ if __name__ == '__main__':
         best_params_path = f"{perm_dir}bestparams_{name}.json"
 
         # Optuna study name
-        st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+        st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
         study_name = f"esnStudy_{st_name}"
         
         try:
@@ -453,7 +453,7 @@ if __name__ == '__main__':
         # Load or fallback best params
         
         try:
-            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth300_wsht{washout}"
             best_params_path = f"{perm_dir}bestparams_{param_name}.json"
             
             with open(best_params_path, 'r') as f:

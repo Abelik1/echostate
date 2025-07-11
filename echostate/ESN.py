@@ -187,7 +187,7 @@ class ESN(torch.nn.Module):
                 'mse': mean_squared_error(P, T).item()
             }
         return preds
-
+#region Tune
     @staticmethod
     def tune(input_list,
              target_list,
@@ -209,7 +209,8 @@ class ESN(torch.nn.Module):
              learning_algo='inv',
              **study_kwargs):
         import optuna
-
+        X_tensor = torch.stack(input_list, dim=0).to(device)
+        Y_tensor = torch.stack(target_list, dim=0).to(device)
         def objective(trial):
             # suggest hyperparams
             reservoir_size = trial.suggest_int('reservoir_size', *reservoir_limit) if isinstance(reservoir_limit, list) else reservoir_limit
@@ -223,9 +224,9 @@ class ESN(torch.nn.Module):
 
             model = ESN(
                 device=device,
-                base_input_dim=input_list[0].shape[1],
+                base_input_dim= input_list[0].shape[1],
                 reservoir_size=reservoir_size,
-                output_dim=target_list[0].shape[1],
+                output_dim= target_list[0].shape[1],
                 feedback=feedback,
                 spectral_radius=spectral_radius,
                 sparsity=sparsity,
@@ -236,12 +237,14 @@ class ESN(torch.nn.Module):
                 ridge_param=ridge_param,
                 learning_algo=learning_algo,
                 batch_size=len(input_list),
-                seed=seed
-            )
+                seed=None
+            ).to(device)
             # training and evaluation
-            X_batch = torch.stack(input_list, dim=0)
-            Y_batch = torch.stack(target_list, dim=0)
-            model.fit(X_batch, Y_batch)
+            # X_batch = torch.stack(input_list, dim=0)
+            # Y_batch = torch.stack(target_list, dim=0)
+            
+
+            model.fit(X_tensor, Y_tensor)
             _, metrics = model.predict(input_list, target_list)
             return metrics['mae']
 
