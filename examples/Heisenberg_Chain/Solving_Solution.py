@@ -394,11 +394,11 @@ if __name__ == '__main__':
     washout = 75
     dt = 0.2
     training_depth = 50
-    n_trials = -1  # no tuning by default
+    n_trials = 200 # no tuning by default
 
     
 
-    for N in [5]:
+    for N in [5,6,10,9]:
         print(f"Solving N: {N}") 
         np.random.seed(seed)
         # high-resolution reference
@@ -406,8 +406,8 @@ if __name__ == '__main__':
         acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
         acc_steps = int(T / acc_dt)
         acc_chain.evolve(acc_steps, store_reduced=False)
-        acc_chain.plot()
-        plt.show()
+        # acc_chain.plot()
+        # plt.show()
         # --- Simulation setup ---
         steps = int(T / dt)
         fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
