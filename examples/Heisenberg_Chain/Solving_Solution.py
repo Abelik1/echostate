@@ -396,24 +396,17 @@ if __name__ == '__main__':
     training_depth = 50
     n_trials = 200 # no tuning by default
 
-<<<<<<< HEAD
-    
-
-    for N in [5,6,10,9]:
-=======
     for N in [2,3,4,5,6,7,8,9,10]:
->>>>>>> f32489f6551ef1747541724406439f951e4454f2
+
         print(f"Solving N: {N}") 
         np.random.seed(seed)
         # high-resolution reference
         acc_dt = 0.05
         acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
         acc_steps = int(T / acc_dt)
-<<<<<<< HEAD
-        acc_chain.evolve(acc_steps, store_reduced=False)
-=======
+
         acc_chain.evolve(acc_steps, store_reduced=True)
->>>>>>> f32489f6551ef1747541724406439f951e4454f2
+
         # acc_chain.plot()
         # plt.show()
         # --- Simulation setup ---
