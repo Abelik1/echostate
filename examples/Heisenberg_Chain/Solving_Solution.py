@@ -137,7 +137,7 @@ class ESNPredictor:
         
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
         self.esn.fit(inputs, targets)
-
+#region Plotting
     def predict_and_plot(self, acc_history=None, acc_chain=None, name="test"):
         """
         Predict with ESN on self.test_history, then plot true vs predicted
@@ -195,8 +195,8 @@ class ESNPredictor:
             plt.plot(acc_t, acc_z_trim, label=f"Fully Accurate dt={acc_dt}")
             
         # print("preds: ", preds[:20])
-        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "1")
-        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "5")
+        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "5")
+        plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "1")
 
         plt.xlim(50, 70)
         plt.xlabel("Time")
@@ -389,23 +389,31 @@ if __name__ == '__main__':
     # Setup parameters
     T = 100
     N = 5
-    seed = 31415
+    seed = 1111
     qubit = 0
     washout = 75
     dt = 0.2
     training_depth = 50
     n_trials = 200 # no tuning by default
 
+<<<<<<< HEAD
     
 
     for N in [5,6,10,9]:
+=======
+    for N in [2,3,4,5,6,7,8,9,10]:
+>>>>>>> f32489f6551ef1747541724406439f951e4454f2
         print(f"Solving N: {N}") 
         np.random.seed(seed)
         # high-resolution reference
         acc_dt = 0.05
         acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
         acc_steps = int(T / acc_dt)
+<<<<<<< HEAD
         acc_chain.evolve(acc_steps, store_reduced=False)
+=======
+        acc_chain.evolve(acc_steps, store_reduced=True)
+>>>>>>> f32489f6551ef1747541724406439f951e4454f2
         # acc_chain.plot()
         # plt.show()
         # --- Simulation setup ---
