@@ -431,7 +431,8 @@ if __name__ == '__main__':
         best_params_path = f"{perm_dir}bestparams_{name}.json"
 
         # Optuna study name
-        study_name = f"esnStudy_{name}"
+        st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+        study_name = f"esnStudy_{st_name}"
         
         try:
             with open(histories_path, 'rb') as f:
@@ -451,6 +452,9 @@ if __name__ == '__main__':
         # Load or fallback best params
         
         try:
+            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+            best_params_path = f"{perm_dir}bestparams_{param_name}.json"
+            
             with open(best_params_path, 'r') as f:
                 all_best = json.load(f)
             best = all_best.get(str(round(dt,5)), {})
