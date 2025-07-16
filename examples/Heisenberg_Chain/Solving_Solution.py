@@ -8,7 +8,7 @@ from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
 
-device = torch.device("cuda"  if torch.cuda.is_available() else "cpu")
+device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
 print(f"Using device: {device}")
 print(torch.__version__)
@@ -231,7 +231,7 @@ class ESNPredictor:
 
 
 
-#region EXAMPLE
+#region Tune/HyperPara
 # -------------Example CASE------------------------------------------
 def plot_hyperparams_vs_N(perm_dir):
     import re
@@ -275,10 +275,13 @@ def plot_hyperparams_vs_N(perm_dir):
         axes = [axes]
 
     for i, param in enumerate(param_names):
-        y = [param_data[N][param] for N in sorted_N]
-        axes[i].plot(sorted_N, y, marker='o')
-        axes[i].set_ylabel(param)
-        axes[i].grid(True)
+        try:
+            y = [param_data[N][param] for N in sorted_N]
+            axes[i].plot(sorted_N, y, marker='o')
+            axes[i].set_ylabel(param)
+            axes[i].grid(True)
+        except:
+            continue
 
     axes[-1].set_xlabel("System Size (N)")
     fig.suptitle("ESN Hyperparameters vs System Size (N)", fontsize=14)
@@ -310,7 +313,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, plots
         study = optuna.load_study(study_name=study_name, storage=f"sqlite:///{study_loc}/{study_name}.db")
         best_params_dict[str(round(dt, 5))] = study.best_params
         
-        output_path = f'./examples/Heisenberg_Chain/trained_esns/bestparams_{name}.json'
+        output_path = f'./examples/Heisenberg_Chain/trained_esns/bestparams_{param_name}.json'
         print(output_path)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w") as f:
@@ -334,7 +337,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, plots
     # Save all best parameters to JSON
     best_params_dict[str(round(dt, 5))] = study.best_params
     
-    output_path = f'./examples/Heisenberg_Chain/trained_esns/bestparams_{name}.json'
+    output_path = f'./examples/Heisenberg_Chain/trained_esns/bestparams_{param_name}.json'
     print(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
@@ -393,10 +396,10 @@ if __name__ == '__main__':
     qubit = 0
     washout = 75
     dt = 0.2
-    training_depth = 300
-    n_trials = 100 # no tuning by default
+    training_depth = 100
+    n_trials = -1 # no tuning by default
 
-    for N in [4]:
+    for N in [6,7,8]:
 
         print(f"Solving N: {N}") 
         np.random.seed(seed)
@@ -453,7 +456,7 @@ if __name__ == '__main__':
         # Load or fallback best params
         
         try:
-            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth300_wsht{washout}"
+            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
             best_params_path = f"{perm_dir}bestparams_{param_name}.json"
             
             with open(best_params_path, 'r') as f:

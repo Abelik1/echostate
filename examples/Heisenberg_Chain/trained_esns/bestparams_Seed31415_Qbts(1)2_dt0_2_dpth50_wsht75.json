@@ -1,12 +1,12 @@
 {
     "0.2": {
-        "reservoir_size": 1497,
-        "spectral_radius": 0.4830129485059361,
+        "reservoir_size": 1367,
+        "spectral_radius": 1.6176394037078357,
         "feedback": 1,
-        "sparsity": 0.8643778094916654,
-        "leak_rate": 0.5892799880936991,
-        "input_scaling": 2.2793739405733637,
-        "bias_scaling": 0.22131044562853486,
-        "ridge_param": 0.9840183691103588
+        "sparsity": 0.7552515202911151,
+        "leak_rate": 0.5812424135175566,
+        "input_scaling": 1.297409195020964,
+        "bias_scaling": 0.34814582346662537,
+        "ridge_param": 0.3740232354315375
     }
 }
