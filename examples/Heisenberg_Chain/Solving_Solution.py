@@ -57,7 +57,7 @@ class ESNPredictor:
         self.training_depth = training_depth
 
         # Initialize or load ESN
-        if model_path is None or not os.path.exists(model_path):
+        if not os.path.exists(model_path):
             self.esn = ESN(
                 device=device,
                 base_input_dim=1,
@@ -75,7 +75,7 @@ class ESNPredictor:
                 seed=seed,
             ).to(device)
         else:
-            self.esn = torch.load(model_path)
+            self.esn = torch.load(model_path, weights_only=False)
             self.esn.to(device).eval()
 
         # Prepare test history if provided
@@ -195,13 +195,13 @@ class ESNPredictor:
             plt.plot(acc_t, acc_z_trim, label=f"Fully Accurate dt={acc_dt}")
             
         # print("preds: ", preds[:20])
-        plt.plot(coarse_t, preds,"-o", label='Predicted ⟨σ_z⟩', markersize = "5")
+        plt.plot(coarse_t, preds,"o", label='Predicted ⟨σ_z⟩', markersize = "4")
         plt.plot(true_t, true, "-o",   label='True ⟨σ_z⟩', markersize = "1")
 
         plt.xlim(50, 70)
         plt.xlabel("Time")
         plt.ylabel("⟨σ_z⟩")
-        plt.title(f'ESN Prediction of Single‐Qubit({self.qubit}){self.N} at T:{T} and dt:{self.dt} Dynamics')
+        plt.title(f'ESN Prediction of Single‐Qubit({self.qubit+1}){self.N} at T:{T} and dt:{self.dt} Dynamics')
         plt.legend()
 
         out_dir = './examples/Heisenberg_Chain/cache'
@@ -344,48 +344,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, plots
         json.dump(best_params_dict, f, indent=4)
         print("Saved Best parameters")
     return study
-
-def dt_loop(): # OUtdated
-    best_params_dict = {}
-
-    for dt in np.arange(0.1, 0.4, 0.05):
-        steps = int(T / dt)
-        name = f"Seed{seed}_Qbts{N}_dt{round(dt,5)}".replace(".", "_", 1)
-        study_name = f"esnStudy_Seed{seed}_Qbts{N}_dt{round(dt,5)}_dpth{training_depth}"
-        model_path = f'./examples/Heisenberg_Chain/trained_esns/trainedmodel_{name}.pt'
-
-        # simulate chain
-        np.random.seed(seed)
-        chain = HeisenbergChain(N, dt=dt)
-        chain.evolve(steps=steps)
-
-        # downsample history
-        history = []
-        for element in chain.history:
-            history.append(element[::int(dt / 0.05)])
-
-        predictor = ESNPredictor(
-            steps=steps,
-            dt=dt,
-            N=N,
-            history_arrays=history,
-            dims=chain.dims,
-            qubit=qubit,
-            batch_size=training_depth,
-            training_depth=training_depth,
-            model_path=model_path,
-            seed=seed,
-        )
-
-        study = Heisen_tune(predictor, study_name=study_name, washout=washout, seed=seed, n_trials=n_trials)
-        best_params_dict[str(round(dt, 5))] = study.best_params
-
-    # Save all best parameters to JSON
-    output_path = f'./examples/Heisenberg_Chain/trained_esns/best{seed}_Qbts{N}_params_by_dt.json'
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(best_params_dict, f, indent=4)
-    
+  
 #region CONTROL  
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -393,121 +352,138 @@ if __name__ == '__main__':
     T = 100
     N = 5
     seed = 31415
-    qubit = 0
+    qubit = 0  #index notation
     washout = 75
     dt = 0.2
-    training_depth = 100
-    n_trials = -1 # no tuning by default
-
-    for N in [6,7,8]:
-
-        print(f"Solving N: {N}") 
-        np.random.seed(seed)
-        # high-resolution reference
-        acc_dt = 0.05
-        acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
-        acc_steps = int(T / acc_dt)
-
-        acc_chain.evolve(acc_steps, store_reduced=True)
-
-        # acc_chain.plot()
-        # plt.show()
-        # --- Simulation setup ---
-        steps = int(T / dt)
-        fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
-        qubit_tag = f"Qbts({qubit + 1}){N}"
-        
-        
-        name = f"Seed{seed}_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
-        
-        
-        # --- File locations ---
-        cache_dir = "./examples/Heisenberg_Chain/cache/"
-        perm_dir = "./examples/Heisenberg_Chain/trained_esns/"
-
-        # Low-resolution history file for specific qubit
-        histories_path = f"{cache_dir}Historydata_Seed{seed}_T{T}_{qubit_tag}_dt{fmt_dt_val}.pkl"
-
-        # Trained ESN model file
-        model_path = f"{cache_dir}trainedmodel_{name}.pt"
-
-        # Best hyperparameter JSON
-        best_params_path = f"{perm_dir}bestparams_{name}.json"
-
-        # Optuna study name
-        st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
-        study_name = f"esnStudy_{st_name}"
-        
-        try:
-            with open(histories_path, 'rb') as f:
-                z_history = pickle.load(f)
-            print("Loading z history...")
-        except FileNotFoundError:
-            np.random.seed(seed)
-            chain = HeisenbergChain(N, qubit, dt=dt)
-            chain.evolve(steps, store_reduced= True)
-            z_history = chain.get_sz()
-            
-            os.makedirs(os.path.dirname(histories_path), exist_ok=True)
-            with open(histories_path, 'wb') as f:
-                pickle.dump(z_history, f)
-                
-        #dt_loop()
-        # Load or fallback best params
-        
-        try:
-            param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
-            best_params_path = f"{perm_dir}bestparams_{param_name}.json"
-            
-            with open(best_params_path, 'r') as f:
-                all_best = json.load(f)
-            best = all_best.get(str(round(dt,5)), {})
-            if best != {}:
-                print("Found best parameters")
-            print(best)
-            
-        except (FileNotFoundError, json.JSONDecodeError):
-            best = {}
-        
-        predictor = ESNPredictor(
-            steps=steps,
-            dt=dt,
-            N=N,
-            qubit=qubit,
-            history_values=z_history,
-            reservoir_size=best.get('reservoir_size', 900),
-            spectral_radius=best.get('spectral_radius', 1.25033),
-            input_scaling=best.get('input_scaling', 0.546107),
-            ridge_param=best.get('ridge_param', 0.170278),
-            leak_rate=best.get('leak_rate', 0.946),
-            sparsity=best.get('sparsity', 0.2),
-            feedback=best.get('feedback', 1),
-            # bias_scaling=best.get("bias_scaling", 0.45),
-            washout=washout,
-            batch_size=training_depth,
-            training_depth=training_depth,
-            model_path= model_path,
-            seed=seed,
-            device=device,
-        )
-        
-        
-        # optional tuning
-        if n_trials > 0:
-            Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=n_trials, plots=False)
-        elif n_trials == 0:
-            Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=0, plots=True)
-        else:
-            if not os.path.exists(model_path):
-                print("Training ESN...")
-                predictor.train()
-                torch.save(predictor.esn, model_path)
-
-            predictor.debug()
-            print("Plotting..")
-            predictor.predict_and_plot(acc_history=acc_chain.get_sz(), acc_chain=acc_chain, name=name)
+    training_depth = 600
     
-    plot_hyperparams_vs_N("./examples/Heisenberg_Chain/trained_esns/")
+    """
+    >0 : tune parameters
+    0: Plots the tune analysis tool
+    -1: Run Training off best parameters
+    -2:                                  """
+    n_trials = -1 # no tuning by default
+    
+    ignore_qubit = True
+    ignore_dpth = False
+    ignore_washout = False
+    
+    for qubit in [0,1,2,3,4,5,6,7,8,9]:
+        for N in [10]:
+
+            print(f"Solving N: {N}") 
+            np.random.seed(seed)
+            # high-resolution reference
+            acc_dt = 0.05
+            acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
+            acc_steps = int(T / acc_dt)
+
+            acc_chain.evolve(acc_steps, store_reduced=True)
+
+            # acc_chain.plot()
+            # plt.show()
+            # --- Simulation setup ---
+            steps = int(T / dt)
+            fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
+            
+            if ignore_qubit:
+                qubit_tag = f"Qbts({0 + 1}){N}"
+            else:
+                qubit_tag = f"Qbts({qubit + 1}){N}"
+            
+            
+            name = f"Seed{seed}_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+            
+            
+            # --- File locations ---
+            cache_dir = "./examples/Heisenberg_Chain/cache/"
+            perm_dir = "./examples/Heisenberg_Chain/trained_esns/"
+
+            # Low-resolution history file for specific qubit
+            histories_path = f"{cache_dir}Historydata_Seed{seed}_T{T}_Qbts({qubit + 1}){N}_dt{fmt_dt_val}.pkl"
+
+            # Trained ESN model file
+            model_path = f"{cache_dir}trainedmodel_{name}.pt"
+
+            # Best hyperparameter JSON
+            best_params_path = f"{perm_dir}bestparams_{name}.json"
+
+            # Optuna study name
+            st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
+            study_name = f"esnStudy_{st_name}"
+            
+            try:
+                with open(histories_path, 'rb') as f:
+                    z_history = pickle.load(f)
+                print("Loading z history...")
+            except FileNotFoundError:
+                np.random.seed(seed)
+                chain = HeisenbergChain(N, qubit, dt=dt)
+                chain.evolve(steps, store_reduced= True)
+                z_history = chain.get_sz()
+                
+                os.makedirs(os.path.dirname(histories_path), exist_ok=True)
+                with open(histories_path, 'wb') as f:
+                    pickle.dump(z_history, f)
+                    
+            #dt_loop()
+            # Load or fallback best params
+            
+            try:
+                param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
+                best_params_path = f"{perm_dir}bestparams_{param_name}.json"
+                
+                with open(best_params_path, 'r') as f:
+                    all_best = json.load(f)
+                best = all_best.get(str(round(dt,5)), {})
+                if best != {}:
+                    print("Found best parameters")
+                print(best)
+                
+            except (FileNotFoundError, json.JSONDecodeError):
+                best = {}
+            
+            predictor = ESNPredictor(
+                steps=steps,
+                dt=dt,
+                N=N,
+                qubit=qubit,
+                history_values=z_history,
+                reservoir_size=best.get('reservoir_size', 900),
+                spectral_radius=best.get('spectral_radius', 1.25033),
+                input_scaling=best.get('input_scaling', 0.546107),
+                ridge_param=best.get('ridge_param', 0.170278),
+                leak_rate=best.get('leak_rate', 0.946),
+                sparsity=best.get('sparsity', 0.2),
+                feedback=best.get('feedback', 1),
+                # bias_scaling=best.get("bias_scaling", 0.45),
+                washout=washout,
+                batch_size=training_depth,
+                training_depth=training_depth,
+                model_path= model_path,
+                seed=seed,
+                device=device,
+            )
+            
+            
+            # optional tuning
+            if n_trials > 0:
+                Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=n_trials, plots=False)
+            elif n_trials == 0:
+                Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=0, plots=True)
+            else:
+                
+                if not os.path.exists(model_path):
+                    print("Training ESN...")
+                    predictor.train()
+                    torch.save(predictor.esn, model_path)
+                else:
+                    print("Loading ESN...")
+                predictor.debug()
+                print("Plotting..")
+                predictor.predict_and_plot(acc_history=acc_chain.get_sz(), acc_chain=acc_chain, name=name)
+    
+    # plot_hyperparams_vs_N("./examples/Heisenberg_Chain/trained_esns/")
     plt.show()
     
         
