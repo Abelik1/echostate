@@ -13,7 +13,7 @@ class HeisenbergChain:
         self.dt = dt
         self.J = J
         self.dtype = dtype
-
+        
         # initial random pure state vector
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N)).astype(self.dtype)
         vec /= np.linalg.norm(vec)
@@ -28,7 +28,16 @@ class HeisenbergChain:
         
         # History of expectation values or reduced density matrices
         self.sz_history = []
-
+        
+    def set_initial_state(self, vec: np.ndarray):
+        """
+        Set custom initial state manually.
+        Assumes the input vector is properly normalized.
+        """
+        if vec.shape != (2**self.N,):
+            raise ValueError(f"Input vector shape mismatch: expected {(2**self.N,)}, got {vec.shape}")
+        self.psi = vec.astype(self.dtype) / np.linalg.norm(vec)
+    
     def _build_hamiltonian(self) -> Qobj:
         H = 0
         for j in range(self.N):
@@ -87,10 +96,37 @@ class HeisenbergChain:
         plt.tight_layout()
         plt.show()
 
+#region TESTING
+def generate_perturbed_states(N, base_seed=31415, epsilon=1e-6):
+        """
+        Returns:
+            - base_vec: original pure state (normalized)
+            - first_qubit_perturbation: small change in amplitudes affecting qubit 0
+            - all_qubits_perturbation: small random change across all amplitudes
+        """
+        np.random.seed(base_seed)
+        base_vec = (np.random.randn(2**N) + 1j * np.random.randn(2**N)).astype(np.complex64)
+        base_vec /= np.linalg.norm(base_vec)
+
+        # Perturbation only in the first qubit's relevant states
+        perturb = np.zeros_like(base_vec)
+        for i in range(len(perturb)):
+            if (i >> (N - 1)) & 1:  # Most significant bit controls qubit 0
+                perturb[i] += epsilon
+        perturbed_first = base_vec + perturb
+        perturbed_first /= np.linalg.norm(perturbed_first)
+
+        # Small perturbation across all qubits
+        noise = epsilon * (np.random.randn(2**N) + 1j * np.random.randn(2**N)).astype(np.complex64)
+        perturbed_all = base_vec + noise
+        perturbed_all /= np.linalg.norm(perturbed_all)
+
+        return base_vec, perturbed_first, perturbed_all
+
+
 if __name__ == '__main__':
     from scipy.interpolate import interp1d
     import pickle
-
     # Simulation parameters
     N = 10
     T = 100
@@ -98,68 +134,110 @@ if __name__ == '__main__':
     dt_list = [0.01, 0.15]
     seed = 31415
 
-    all_z = []
-    all_times = []
-    errors = []
+    if False: # Used for standard testing
+        all_z = []
+        all_times = []
+        errors = []
 
-    # Paths for caching
-    base = './examples/Heisenberg_Chain/cache'
-    histories_path_time = f'{base}/Historydata({seed})_N{N}_alltimes.pkl'
-    histories_path_z    = f'{base}/Historydata({seed})_N{N}_allz.pkl'
+        # Paths for caching
+        base = './examples/Heisenberg_Chain/cache'
+        histories_path_time = f'{base}/Historydata({seed})_N{N}_alltimes.pkl'
+        histories_path_z    = f'{base}/Historydata({seed})_N{N}_allz.pkl'
 
-    # Load or generate trajectories
-    try:
-        with open(histories_path_time, 'rb') as f:
-            all_times = pickle.load(f)
-        with open(histories_path_z, 'rb') as f:
-            all_z    = pickle.load(f)
-    except FileNotFoundError:
-        for dt in dt_list:
-            steps = int(T / dt)
-            print(f"Processing dt={dt}, steps={steps}")
-            np.random.seed(seed)
-            chain = HeisenbergChain(N, qubit, J=1.0, dt=dt)
+        # Load or generate trajectories
+        try:
+            with open(histories_path_time, 'rb') as f:
+                all_times = pickle.load(f)
+            with open(histories_path_z, 'rb') as f:
+                all_z    = pickle.load(f)
+        except FileNotFoundError:
+            for dt in dt_list:
+                steps = int(T / dt)
+                print(f"Processing dt={dt}, steps={steps}")
+                np.random.seed(seed)
+                chain = HeisenbergChain(N, qubit, J=1.0, dt=dt)
+                chain.evolve(steps)
+                chain.plot()
+                z_vals = chain.get_sz()
+                times = np.arange(len(z_vals)) * dt
+                all_z.append(z_vals)
+                all_times.append(times)
+
+            # Cache results
+            import os
+            os.makedirs(base, exist_ok=True)
+            with open(histories_path_time, 'wb') as f:
+                pickle.dump(all_times, f)
+            with open(histories_path_z, 'wb') as f:
+                pickle.dump(all_z, f)
+
+        # Reference trajectory
+        ref_z = all_z[0]
+        ref_t = all_times[0]
+
+        # Compute mean absolute errors
+        for i, (t_arr, z_arr) in enumerate(zip(all_times, all_z)):
+            if i == 0:
+                errors.append(0.0)
+                continue
+            f_interp = interp1d(t_arr, z_arr, bounds_error=False, fill_value="extrapolate")
+            errors.append(np.mean(np.abs(f_interp(ref_t) - ref_z)))
+
+        # Plot error vs dt
+        plt.figure()
+        plt.plot(dt_list, errors, marker='o')
+        plt.xlabel('dt')
+        plt.ylabel('Mean Absolute Error vs smallest dt')
+        plt.title('Fidelity loss with increasing dt')
+        plt.grid(True)
+        plt.tight_layout()
+
+        # Compare two trajectories visually
+        plt.figure()
+        plt.plot(all_times[0], all_z[0], label=f"dt={dt_list[0]}")
+        plt.plot(all_times[1], all_z[1], label=f"dt={dt_list[1]}")
+        plt.xlabel('Time')
+        plt.ylabel(f"⟨σ_z⟩ (qubit {qubit})")
+        plt.legend()
+        plt.show()
+
+    if True:  # Used for perturbed testing
+        N = 5
+        qubit = 0
+        T = 1000
+        dt = 0.2
+        steps = int(T / dt)
+
+        # Generate initial states
+        base_vec, pert1, pert2 = generate_perturbed_states(N, base_seed=31415, epsilon=1e-2)
+
+        # Initialize chains
+        chains = []
+        for psi in [base_vec, pert1, pert2]:
+            chain = HeisenbergChain(N, qubit, dt=dt)
+            chain.set_initial_state(psi)
             chain.evolve(steps)
-            chain.plot()
-            z_vals = chain.get_sz()
-            times = np.arange(len(z_vals)) * dt
-            all_z.append(z_vals)
-            all_times.append(times)
+            chains.append(chain)
 
-        # Cache results
-        import os
-        os.makedirs(base, exist_ok=True)
-        with open(histories_path_time, 'wb') as f:
-            pickle.dump(all_times, f)
-        with open(histories_path_z, 'wb') as f:
-            pickle.dump(all_z, f)
+        # Compare ⟨σ_z⟩ values
+        zs = [chain.get_sz() for chain in chains]
+        times = np.arange(len(zs[0])) * dt
 
-    # Reference trajectory
-    ref_z = all_z[0]
-    ref_t = all_times[0]
+        import matplotlib.pyplot as plt
 
-    # Compute mean absolute errors
-    for i, (t_arr, z_arr) in enumerate(zip(all_times, all_z)):
-        if i == 0:
-            errors.append(0.0)
-            continue
-        f_interp = interp1d(t_arr, z_arr, bounds_error=False, fill_value="extrapolate")
-        errors.append(np.mean(np.abs(f_interp(ref_t) - ref_z)))
-
-    # Plot error vs dt
-    plt.figure()
-    plt.plot(dt_list, errors, marker='o')
-    plt.xlabel('dt')
-    plt.ylabel('Mean Absolute Error vs smallest dt')
-    plt.title('Fidelity loss with increasing dt')
-    plt.grid(True)
-    plt.tight_layout()
-
-    # Compare two trajectories visually
-    plt.figure()
-    plt.plot(all_times[0], all_z[0], label=f"dt={dt_list[0]}")
-    plt.plot(all_times[1], all_z[1], label=f"dt={dt_list[1]}")
-    plt.xlabel('Time')
-    plt.ylabel(f"⟨σ_z⟩ (qubit {qubit})")
-    plt.legend()
-    plt.show()
+        plt.figure(figsize=(10, 5))
+        labels = ['Original', 'Perturbed Qubit 0', 'Perturbed All Qubits']
+        for i, z in enumerate(zs):
+            plt.plot(times, z, label=labels[i])
+        plt.xlabel("Time")
+        plt.ylabel(f"⟨σ_z⟩ for qubit {qubit}")
+        plt.title("Sensitivity to Initial State Perturbations")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.xlim(500,600)
+        mae_01 = np.mean(np.abs(zs[0] - zs[1]))
+        mae_02 = np.mean(np.abs(zs[0] - zs[2]))
+        print(f"MAE (Original vs Perturbed Qubit 0): {mae_01:.6e}")
+        print(f"MAE (Original vs Perturbed All):     {mae_02:.6e}")
+        plt.show()
