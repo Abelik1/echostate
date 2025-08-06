@@ -8,16 +8,17 @@ from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
 
-device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+# device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cpu') if torch.cuda.is_available() else torch.device('cpu')
 
-print(f"Using device: {device}")
-print(torch.__version__)
-print(torch.cuda.is_available())
-print(torch.cuda.get_device_name(0))
-# Extra check
-if device.type == "cuda":
-    print(f"GPU name: {torch.cuda.get_device_name(0)}")
-    print(f"Memory usage: {torch.cuda.memory_allocated() / 1e6:.2f} MB")
+# print(f"Using device: {device}")
+# print(torch.__version__)
+# print(torch.cuda.is_available())
+# print(torch.cuda.get_device_name(0))
+# # Extra check
+# if device.type == "cuda":
+#     print(f"GPU name: {torch.cuda.get_device_name(0)}")
+#     print(f"Memory usage: {torch.cuda.memory_allocated() / 1e6:.2f} MB")
 
 
 
@@ -350,12 +351,16 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     # Setup parameters
     T = 100
-    N = 5
-    seed = 31415
-    qubit = 0  #index notation
+    N_list = [3]
+    train_seed = 31415
+    test_seed = 31
+    qubit_list = []  #index notation
     washout = 75
+    
     dt = 0.2
-    training_depth = 600
+    acc_dt = 0.05
+    training_depth = 1600
+    testing_depth = training_depth / 5
     
     """
     >0 : tune parameters
@@ -364,124 +369,129 @@ if __name__ == '__main__':
     -2:                                  """
     n_trials = -1 # no tuning by default
     
+    official_run = True
     ignore_qubit = True
     ignore_dpth = False
     ignore_washout = False
     
-    for qubit in [0,1,2,3,4,5,6,7,8,9]:
-        for N in [10]:
 
-            print(f"Solving N: {N}") 
-            np.random.seed(seed)
-            # high-resolution reference
-            acc_dt = 0.05
-            acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
-            acc_steps = int(T / acc_dt)
+    for seed in [train_seed, test_seed] if official_run else [train_seed]:
+        for qubit in qubit_list:
+            for N in N_list:
 
-            acc_chain.evolve(acc_steps, store_reduced=True)
-
-            # acc_chain.plot()
-            # plt.show()
-            # --- Simulation setup ---
-            steps = int(T / dt)
-            fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
-            
-            if ignore_qubit:
-                qubit_tag = f"Qbts({0 + 1}){N}"
-            else:
-                qubit_tag = f"Qbts({qubit + 1}){N}"
-            
-            
-            name = f"Seed{seed}_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
-            
-            
-            # --- File locations ---
-            cache_dir = "./examples/Heisenberg_Chain/cache/"
-            perm_dir = "./examples/Heisenberg_Chain/trained_esns/"
-
-            # Low-resolution history file for specific qubit
-            histories_path = f"{cache_dir}Historydata_Seed{seed}_T{T}_Qbts({qubit + 1}){N}_dt{fmt_dt_val}.pkl"
-
-            # Trained ESN model file
-            model_path = f"{cache_dir}trainedmodel_{name}.pt"
-
-            # Best hyperparameter JSON
-            best_params_path = f"{perm_dir}bestparams_{name}.json"
-
-            # Optuna study name
-            st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
-            study_name = f"esnStudy_{st_name}"
-            
-            try:
-                with open(histories_path, 'rb') as f:
-                    z_history = pickle.load(f)
-                print("Loading z history...")
-            except FileNotFoundError:
-                np.random.seed(seed)
-                chain = HeisenbergChain(N, qubit, dt=dt)
-                chain.evolve(steps, store_reduced= True)
-                z_history = chain.get_sz()
+                print(f"Solving N: {N}") 
+                np.random.seed(train_seed)
+                # high-resolution reference
                 
-                os.makedirs(os.path.dirname(histories_path), exist_ok=True)
-                with open(histories_path, 'wb') as f:
-                    pickle.dump(z_history, f)
-                    
-            #dt_loop()
-            # Load or fallback best params
-            
-            try:
-                param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
-                best_params_path = f"{perm_dir}bestparams_{param_name}.json"
+                acc_chain = HeisenbergChain(N, qubit, dt=acc_dt)
+                acc_steps = int(T / acc_dt)
+
+                acc_chain.evolve(acc_steps, store_reduced=True)
+
+                # acc_chain.plot()
+                # plt.show()
+                # --- Simulation setup ---
+                steps = int(T / dt)
+                fmt_dt_val = str(round(dt, 5)).replace(".", "_", 1)
                 
-                with open(best_params_path, 'r') as f:
-                    all_best = json.load(f)
-                best = all_best.get(str(round(dt,5)), {})
-                if best != {}:
-                    print("Found best parameters")
-                print(best)
-                
-            except (FileNotFoundError, json.JSONDecodeError):
-                best = {}
-            
-            predictor = ESNPredictor(
-                steps=steps,
-                dt=dt,
-                N=N,
-                qubit=qubit,
-                history_values=z_history,
-                reservoir_size=best.get('reservoir_size', 900),
-                spectral_radius=best.get('spectral_radius', 1.25033),
-                input_scaling=best.get('input_scaling', 0.546107),
-                ridge_param=best.get('ridge_param', 0.170278),
-                leak_rate=best.get('leak_rate', 0.946),
-                sparsity=best.get('sparsity', 0.2),
-                feedback=best.get('feedback', 1),
-                # bias_scaling=best.get("bias_scaling", 0.45),
-                washout=washout,
-                batch_size=training_depth,
-                training_depth=training_depth,
-                model_path= model_path,
-                seed=seed,
-                device=device,
-            )
-            
-            
-            # optional tuning
-            if n_trials > 0:
-                Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=n_trials, plots=False)
-            elif n_trials == 0:
-                Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=seed, n_trials=0, plots=True)
-            else:
-                
-                if not os.path.exists(model_path):
-                    print("Training ESN...")
-                    predictor.train()
-                    torch.save(predictor.esn, model_path)
+                if ignore_qubit:
+                    qubit_tag = f"Qbts({0 + 1}){N}"
                 else:
-                    print("Loading ESN...")
-                predictor.debug()
-                print("Plotting..")
-                predictor.predict_and_plot(acc_history=acc_chain.get_sz(), acc_chain=acc_chain, name=name)
+                    qubit_tag = f"Qbts({qubit + 1}){N}"
+                
+                
+                name = f"Seed{seed}_{qubit_tag}_dt{fmt_dt_val}_dpth{training_depth}_wsht{washout}"
+                
+                
+                # --- File locations ---
+                cache_dir = "./examples/Heisenberg_Chain/cache/"
+                perm_dir = "./examples/Heisenberg_Chain/trained_esns/"
+
+                # Low-resolution history file for specific qubit
+                histories_path = f"{cache_dir}Historydata_Seed{seed}_T{T}_Qbts({qubit + 1}){N}_dt{fmt_dt_val}.pkl"
+
+                # Trained ESN model file
+                model_path = f"{cache_dir}trainedmodel_{name}.pt"
+
+                # Best hyperparameter JSON
+                best_params_path = f"{perm_dir}bestparams_{name}.json"
+
+                # Optuna study name
+                st_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
+                study_name = f"esnStudy_{st_name}"
+                
+                try:
+                    with open(histories_path, 'rb') as f:
+                        z_history = pickle.load(f)
+                    print("Loading z history...")
+                except FileNotFoundError:
+                    np.random.seed(seed)
+                    chain = HeisenbergChain(N, qubit, dt=dt)
+                    chain.evolve(steps, store_reduced= True)
+                    z_history = chain.get_sz()
+                    
+                    os.makedirs(os.path.dirname(histories_path), exist_ok=True)
+                    with open(histories_path, 'wb') as f:
+                        pickle.dump(z_history, f)
+                        
+                #dt_loop()
+                # Load or fallback best params
+                
+                try:
+                    param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{washout}"
+                    best_params_path = f"{perm_dir}bestparams_{param_name}.json"
+                    
+                    with open(best_params_path, 'r') as f:
+                        all_best = json.load(f)
+                    best = all_best.get(str(round(dt,5)), {})
+                    if best != {}:
+                        print("Found best parameters")
+                    print(best)
+                    
+                except (FileNotFoundError, json.JSONDecodeError):
+                    best = {}
+                #region Run
+                if seed == test_seed:
+                        
+                    predictor = ESNPredictor(
+                        steps=steps,
+                        dt=dt,
+                        N=N,
+                        qubit=qubit,
+                        history_values=z_history,
+                        reservoir_size=best.get('reservoir_size', 900),
+                        spectral_radius=best.get('spectral_radius', 1.25033),
+                        input_scaling=best.get('input_scaling', 0.546107),
+                        ridge_param=best.get('ridge_param', 0.170278),
+                        leak_rate=best.get('leak_rate', 0.946),
+                        sparsity=best.get('sparsity', 0.2),
+                        feedback=best.get('feedback', 1),
+                        # bias_scaling=best.get("bias_scaling", 0.45),
+                        washout=washout,
+                        batch_size=training_depth,
+                        training_depth=training_depth,
+                        model_path= model_path,
+                        seed=train_seed,
+                        device=device,
+                    )
+                    
+                    
+                    # optional tuning
+                    if n_trials > 0:
+                        Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=train_seed, n_trials=n_trials, plots=False)
+                    elif n_trials == 0:
+                        Heisen_tune(predictor, study_name= study_name, study_loc= perm_dir, washout=washout, seed=train_seed, n_trials=0, plots=True)
+                    else:
+                        
+                        if not os.path.exists(model_path):
+                            print("Training ESN...")
+                            predictor.train()
+                            torch.save(predictor.esn, model_path)
+                        else:
+                            print("Loading ESN...")
+                        predictor.debug()
+                        print("Plotting..")
+                        predictor.predict_and_plot(acc_history=acc_chain.get_sz(), acc_chain=acc_chain, name=name)
     
     # plot_hyperparams_vs_N("./examples/Heisenberg_Chain/trained_esns/")
     plt.show()
