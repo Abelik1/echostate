@@ -1,0 +1,13 @@
+✅ Functionality to Preserve or Recreate
+Feature	Status	Notes
+1. Use Optuna-tuned hyperparameters	✅	Best parameters are loaded from bestparams_*.json per (N, qubit, dt)
+2. Support for ignore_qubit flag	✅	If ignore_qubit=True, ESN is always trained on qubit=0 but tested on others
+3. Avoid overwriting files when looping over N_list and qubit_list	✅	All filenames (model_path, plot_path) use N, qubit, and Ex{i} tags
+4. Load trained ESNs if they already exist	✅	Trained models are loaded from .pt files if available
+5. Save new trained ESNs if not found	✅	If not cached, models are trained and saved to disk
+6. Properly process test trajectory (z_test) from reduced density matrices	✅	Uses expect(sigmaz(), Qobj(...))
+7. Save prediction plots for each (N, qubit)	✅	PDF files named official_overlay_N{N}_Q{qubit}... are saved
+8. Save MAE for every ESN into a CSV summary	✅	Output is official_run_mae_summary.csv
+9. Fill space between ±σ (uncertainty band)	✅	Uses ax.fill_between(mean - std, mean + std)
+10. Support multiple qubits and Ns in one figure	✅	Uses plt.subplots(len(N_list), len(qubit_list)) grid
+11. Plot overlay of all ESNs with one bold trace	✅	Overlays shown with mean ± std and true ⟨σ_z⟩
