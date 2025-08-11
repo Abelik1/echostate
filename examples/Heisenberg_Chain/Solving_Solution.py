@@ -298,13 +298,13 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit=[400, 3000],
+            reservoir_limit=[400, 5000],
             spectral_radius_limit=[0.1, 2],
-            feedback_limit=[1,3],
+            feedback_limit=[1,2],
             input_scaling_limit=[0.05,2.0],
             ridge_param_limit=[1e-8, 1],
             leak_rate_limit=[0.2, 1.0],
-            sparsity_limit=[0.1, 1.0],
+            sparsity_limit=[0.05, 0.2],
             bias_scaling_limit=[0.05, 0.95],
             device=predictor.device,
             learning_algo="inv"
@@ -745,15 +745,15 @@ if __name__ == '__main__':
     train_seed     = 31415
     reservoir_seed  = 31415
     pred_seed     = 31415
-    qubit_list     = [0]       # list of qubit indices
+    qubit_list     = [0,1,2]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 1000 # Number of time series used to train 1 ESN
+    training_depth = 50 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = False  # run Optuna tuning
+    do_tune        = True  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     official_run   = True   # run ensemble of ESNs & shaded plot
     do_predictions = False
@@ -904,13 +904,23 @@ if __name__ == '__main__':
                 all_preds = []
                 base_name = f"N{N}_{qubit_tag}_dt{fmt_dt_val}"
 
+                # Build the dt stream used for ESN evaluation ONCE
+                if not np.isclose(dt, acc_dt):
+                    ratio = dt / acc_dt
+                    k = int(round(ratio))
+                    if not np.isclose(k * acc_dt, dt):
+                        raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
+                else:
+                    k = 1
+                z_eval = z_test[::k]
+
                 for i, rseed in enumerate(seeds):
                     model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed{rseed}_{base_name}.pt")
 
                     # fresh ESN for each seed (lazily constructed)
                     esn = predictor.make_esn(
                         reservoir_size=best.get("reservoir_size", 2347),
-                        spectral_radius=best.get("spectral_radius",  1.56526),
+                        spectral_radius=best.get("spectral_radius", 1.56526),
                         input_scaling=best.get("input_scaling", 0.9480),
                         ridge_param=best.get("ridge_param", 1e-1),
                         leak_rate=best.get("leak_rate", 0.1947),
@@ -929,37 +939,87 @@ if __name__ == '__main__':
                         predictor.train_esn(esn)
                         torch.save(esn, model_path)
 
+                    # Log the params you ACTUALLY used (not the old defaults)
                     config_records.append({
                         "N": N, "qubit": qubit, "Ex": i, "seed": rseed,
-                        "reservoir_size": best.get("reservoir_size", 900),
-                        "spectral_radius": best.get("spectral_radius", 1.25),
-                        "input_scaling": best.get("input_scaling", 0.55),
+                        "reservoir_size": best.get("reservoir_size", 2347),
+                        "spectral_radius": best.get("spectral_radius", 1.56526),
+                        "input_scaling": best.get("input_scaling", 0.9480),
                         "ridge_param": best.get("ridge_param", 1e-1),
-                        "leak_rate": best.get("leak_rate", 0.9),
-                        "sparsity": best.get("sparsity", 0.2),
-                        "feedback": best.get("feedback", 1),
-                        "bias_scaling": best.get("bias_scaling", 0.4)
+                        "leak_rate": best.get("leak_rate", 0.1947),
+                        "sparsity": best.get("sparsity", 0.15286),
+                        "feedback": best.get("feedback", 2),
+                        "bias_scaling": best.get("bias_scaling", 0.277)
                     })
-                    if not np.isclose(dt, acc_dt):
-                        ratio = dt / acc_dt
-                        k = int(round(ratio))
-                        if not np.isclose(k * acc_dt, dt):
-                            raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
-                        z_eval = z_test[::k]           # <-- this is the sequence the ESN must see
-                    else:
-                        z_eval = z_test
 
                     pred, true = predictor.predict_sequence(esn, z_eval)
-                    
-                  
                     all_preds.append(pred)
 
                     mae = mean_absolute_error(torch.tensor(pred), torch.tensor(true)).item()
                     mae_records.append({"N": N, "qubit": qubit, "Ex": i, "seed": rseed, "MAE": mae})
 
-                # Only do this if you actually evaluated more than one qubit
-                if len(per_qubit_true) >= 1 and len(per_qubit_pred) >= 1:
-                    # equalize length across qubits (use min T)
+                # ---------- Plot overlay (dt metrics + high-res visuals) ----------
+                ax = axs[row_idx][col_idx]
+                all_preds = np.stack(all_preds)
+                mean_pred = all_preds.mean(axis=0)
+                std_pred  = all_preds.std(axis=0)
+
+                # truth aligned to predictions at dt (washout already applied inside predict)
+                true_dt = z_eval[washout + 1 : washout + 1 + mean_pred.shape[0]]
+                T_eff   = min(len(true_dt), len(mean_pred))
+                true_dt = true_dt[:T_eff]
+                mean_pred = mean_pred[:T_eff]
+                std_pred  = std_pred[:T_eff]
+
+                # record per-qubit series at dt (used later for diagnostics / magnetization)
+                per_qubit_true[qubit] = true_dt.copy()
+                per_qubit_pred[qubit] = mean_pred.copy()
+
+                # one per-qubit diagnostic block (no duplicates)
+                per_qubit_diag = {
+                    "N": N, "qubit": qubit,
+                    "pred_summary": summarize(mean_pred),
+                    "true_summary": summarize(true_dt),
+                    "pred_bounds": check_bounds(mean_pred),
+                    "acf1_pred": autocorr_lag1(mean_pred),
+                    "acf1_true": autocorr_lag1(true_dt),
+                    "series_error": compare_series(mean_pred, true_dt),
+                }
+                diagnostic_rows.append(per_qubit_diag)
+
+                # time axes — RELATIVE (start at t = (washout+1)*dt)
+                t_dt   = np.arange(len(mean_pred)) * dt
+                t0     = (washout + 1) * dt
+                start_hi = int(round(t0 / acc_dt))
+                t_fine_rel = np.arange(len(z_test)) * acc_dt - t0
+
+                # draw
+                ax.plot(t_fine_rel[start_hi:], z_test[start_hi:], '-', lw=1.2, color='green', label='True (acc_dt)')
+                ax.plot(t_dt, true_dt, 'o', ms=1, color='darkgreen', alpha=0.8)
+
+                ax.fill_between(t_dt, mean_pred - std_pred, mean_pred + std_pred, alpha=0.2, label="±1σ")
+                ax.plot(t_dt, mean_pred, 'o-', ms=2, label="Mean Prediction")
+
+                # label ensemble members only once to avoid legend spam
+                label_once = True
+                for ipreds in all_preds:
+                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9,
+                            label="ESN members" if label_once else None)
+                    label_once = False
+
+                ax.set_xlim(0, 70)
+                ax.set_title(f"N={N}, Qubit={qubit}")
+                ax.set_xlabel("Time")
+                ax.set_ylabel("⟨σ_z⟩")
+                ax.legend()
+
+                fig_path = os.path.join(model_dir, f"official_overlay_{base_name}.pdf")
+                fig.savefig(fig_path)
+                print(f"Saved overlay plot to {fig_path}")
+
+                # ---------- (OPTIONAL) Global magnetization ----------
+                # Do this once you have ≥2 qubits recorded
+                if len(per_qubit_true) >= 2 and len(per_qubit_pred) >= 2:
                     T_min_true = min(len(v) for v in per_qubit_true.values())
                     T_min_pred = min(len(v) for v in per_qubit_pred.values())
                     T_min = min(T_min_true, T_min_pred)
@@ -974,78 +1034,8 @@ if __name__ == '__main__':
                         "mag_pred_drift": drift_stats(Mz_pred),
                         "mag_series_error": compare_series(Mz_pred, Mz_true)
                     }
-
                     diagnostic_rows.append({"global_magnetization": mag_diag})
 
-                    # Optional: assert invariants (fail-fast)
-                    # assert abs(mag_diag["mag_true_drift"]["linear_slope"]) < 1e-8, "Energy drift too large"
-                
-                # Plot overlay (dt metrics + high-res visuals)
-                ax = axs[row_idx][col_idx]
-                all_preds = np.stack(all_preds)
-                mean_pred = all_preds.mean(axis=0)
-                std_pred  = all_preds.std(axis=0)
-
-                # --- build the dt stream used for metrics from the high-res z_test ---
-                if not np.isclose(dt, acc_dt):
-                    ratio = dt / acc_dt
-                    k = int(round(ratio))
-                    if not np.isclose(k * acc_dt, dt):
-                        raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
-                else:
-                    print("Using K =1")
-                    k = 1
-                z_eval = z_test[::k]
-
-                # truth aligned to predictions at dt (washout already applied inside predict)
-                true_dt = z_eval[washout + 1 : washout + 1 + mean_pred.shape[0]]
-                T_eff   = min(len(true_dt), len(mean_pred))
-                true_dt = true_dt[:T_eff]
-                mean_pred = mean_pred[:T_eff]
-                std_pred  = std_pred[:T_eff]
-
-                # record per-qubit series at dt (used later for diagnostics / magnetization)
-                per_qubit_true[qubit] = true_dt.copy()
-                per_qubit_pred[qubit] = mean_pred.copy()
-
-                # quick per-qubit ESN sanity (at dt)
-                per_qubit_diag = {
-                    "N": N, "qubit": qubit,
-                    "pred_summary": summarize(mean_pred),
-                    "true_summary": summarize(true_dt),
-                    "pred_bounds": check_bounds(mean_pred),
-                    "acf1_pred": autocorr_lag1(mean_pred),
-                    "acf1_true": autocorr_lag1(true_dt),
-                    "series_error": compare_series(mean_pred, true_dt),
-                }
-                diagnostic_rows.append(per_qubit_diag)
-
-                # --- time axes ---
-                t_dt   = np.arange(len(mean_pred)) * dt
-                t_fine = np.arange(len(z_test)) * acc_dt  # high-res for pretty plotting
-
-                # --- draw ---
-                # 1) smooth high-res truth (visual only)
-                ax.plot(t_fine, z_test, '-', linewidth=1.2, color='green', label='True (acc_dt)')
-
-                # 2) the dt truth actually used for MAE/fit (markers only)
-                ax.plot(t_dt, true_dt, 'o', markersize=1, color='darkgreen', alpha=0.8, label='True (dt samples)')
-
-                # 3) ESN predictions (dt)
-                ax.fill_between(t_dt, mean_pred - std_pred, mean_pred + std_pred, alpha=0.2, label="±1σ")
-                ax.plot(t_dt, mean_pred, 'o-', markersize=2, label="Mean Prediction")
-                for i, ipreds in enumerate(all_preds):
-                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.6, label=f"ESNS {i}")
-
-                ax.set_xlim(0, 15)
-                ax.set_title(f"N={N}, Qubit={qubit}")
-                ax.set_xlabel("Time")
-                ax.set_ylabel("⟨σ_z⟩")
-                ax.legend()
-
-                fig_path = os.path.join(model_dir, f"official_overlay_{base_name}.pdf")
-                fig.savefig(fig_path)
-                print(f"Saved overlay plot to {fig_path}")
 
                 
         # Save diagnostics summary
