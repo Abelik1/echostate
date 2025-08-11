@@ -200,7 +200,7 @@ class ESN(torch.nn.Module):
              study_name=None,
              study_loc=None,
              washout=0,
-             seed=None,
+             seed=31415, #TODO Set to NONE
              reservoir_limit=200,
              spectral_radius_limit=0.9,
              feedback_limit=0,
