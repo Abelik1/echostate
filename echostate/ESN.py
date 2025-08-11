@@ -86,7 +86,7 @@ class ESN(torch.nn.Module):
 
         B, T, _ = inputs.shape
         # move once to device + scale
-        X = inputs.to(self.device) * self.input_scaling
+        X = inputs.to(self.device)
         Y = targets.to(self.device)
 
         # initial reservoir state
@@ -135,37 +135,50 @@ class ESN(torch.nn.Module):
         self.W_out = self.trainer.fit(X_all, Y_all)
         return self.W_out
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """
-        Auto-regressive generation: predict sequence with feedback.
-        inputs: (T, base_input_dim)
-        returns: (T - washout, output_dim)
-        """
-        assert self.W_out is not None, "Model must be fit before forward()"
+    def forward(self, inputs: torch.Tensor, *, closed_loop_after_washout=True,
+            exclude_latest_from_feedback=False) -> torch.Tensor:
+        assert self.W_out is not None
         T, _ = inputs.shape
-        X = inputs.to(self.device) * self.input_scaling
+        X = inputs.to(self.device) 
 
         x = torch.zeros(self.reservoir_size, device=self.device)
         preds = []
-        prev_fb = torch.zeros(self.feedback * self.output_dim, device=self.device) if self.feedback>0 else None
+        prev_fb = torch.zeros(self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
+        last_y = None  # will hold the last predicted output (shape: [1, output_dim])
 
         for t in range(T):
-            u_base = X[t:t+1, :]
-            if self.feedback>0:
-                u = torch.cat([u_base, prev_fb.unsqueeze(0)], dim=1)
+            use_closed = closed_loop_after_washout and (t >= self.washout) and (last_y is not None)
+
+            # 1) Base input: ground truth before washout; prediction after washout
+            if use_closed:
+                u_base = last_y  # shape (1, output_dim) == (1, base_input_dim)
+            else:
+                u_base = X[t:t+1, :]  # as before
+
+            # 2) Feedback: predicted outputs buffer
+            if self.feedback > 0:
+                fb = prev_fb.unsqueeze(0)  # shape (1, feedback*output_dim)
+                if use_closed and exclude_latest_from_feedback and self.feedback > 0:
+                    # Zero-out the most recent block to avoid duplicating y_{t-1} in both base and feedback
+                    fb = fb.clone()
+                    fb[..., -self.output_dim:] = 0.0
+                u = torch.cat([u_base, fb], dim=1)
             else:
                 u = u_base
 
+            # 3) Reservoir update + readout
             x = self.reservoir.update_batch(x, u, self.leak_rate)
             bias_vec = self._ensure_batch_bias(1)
             xb = torch.cat([x, bias_vec[:1]], dim=1)
-            y = xb @ self.W_out.T
+            y = xb @ self.W_out.T  # shape (1, output_dim)
             preds.append(y.squeeze(0))
 
-            if self.feedback>0:
-                prev_fb = torch.cat([prev_fb[self.output_dim:], y.squeeze(0)], dim=0)
+            # 4) Update feedback buffer with prediction (never truth during inference)
+            if self.feedback > 0:
+                prev_fb = torch.cat([prev_fb[self.output_dim:], y.squeeze(0)], dim=0) if prev_fb.numel() else y.squeeze(0)
 
-        # trim initial washout if desired
+            last_y = y  # for closed-loop base input
+
         out = torch.stack(preds, dim=0)
         return out[self.washout:]
 
