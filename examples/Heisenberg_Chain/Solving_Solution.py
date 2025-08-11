@@ -945,9 +945,10 @@ if __name__ == '__main__':
                         k = int(round(ratio))
                         if not np.isclose(k * acc_dt, dt):
                             raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
-                        z_eval = z_test[::k]  # downsample high-res to training step
+                        z_eval = z_test[::k]           # <-- this is the sequence the ESN must see
                     else:
                         z_eval = z_test
+
                     pred, true = predictor.predict_sequence(esn, z_eval)
                     
                   
@@ -979,41 +980,63 @@ if __name__ == '__main__':
                     # Optional: assert invariants (fail-fast)
                     # assert abs(mag_diag["mag_true_drift"]["linear_slope"]) < 1e-8, "Energy drift too large"
                 
-                # Plot overlay (unchanged style, just uses arrays we built)
+                # Plot overlay (dt metrics + high-res visuals)
                 ax = axs[row_idx][col_idx]
                 all_preds = np.stack(all_preds)
-                
                 mean_pred = all_preds.mean(axis=0)
-                true_aligned = z_test[washout + 1: washout + 1 + mean_pred.shape[0]]
+                std_pred  = all_preds.std(axis=0)
 
-                per_qubit_true[qubit] = true_aligned.copy()
+                # --- build the dt stream used for metrics from the high-res z_test ---
+                if not np.isclose(dt, acc_dt):
+                    ratio = dt / acc_dt
+                    k = int(round(ratio))
+                    if not np.isclose(k * acc_dt, dt):
+                        raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
+                else:
+                    print("Using K =1")
+                    k = 1
+                z_eval = z_test[::k]
+
+                # truth aligned to predictions at dt (washout already applied inside predict)
+                true_dt = z_eval[washout + 1 : washout + 1 + mean_pred.shape[0]]
+                T_eff   = min(len(true_dt), len(mean_pred))
+                true_dt = true_dt[:T_eff]
+                mean_pred = mean_pred[:T_eff]
+                std_pred  = std_pred[:T_eff]
+
+                # record per-qubit series at dt (used later for diagnostics / magnetization)
+                per_qubit_true[qubit] = true_dt.copy()
                 per_qubit_pred[qubit] = mean_pred.copy()
 
-                # quick per-qubit ESN sanity
+                # quick per-qubit ESN sanity (at dt)
                 per_qubit_diag = {
                     "N": N, "qubit": qubit,
                     "pred_summary": summarize(mean_pred),
-                    "true_summary": summarize(true_aligned),
+                    "true_summary": summarize(true_dt),
                     "pred_bounds": check_bounds(mean_pred),
                     "acf1_pred": autocorr_lag1(mean_pred),
-                    "acf1_true": autocorr_lag1(true_aligned),
-                    "series_error": compare_series(mean_pred, true_aligned)
+                    "acf1_true": autocorr_lag1(true_dt),
+                    "series_error": compare_series(mean_pred, true_dt),
                 }
-                # append it to a list you’ll dump later
                 diagnostic_rows.append(per_qubit_diag)
-                
-                
-                times = np.arange(all_preds.shape[1]) * dt
-                mean_pred = all_preds.mean(axis=0)
-                std_pred = all_preds.std(axis=0)
-                true = z_test[washout + 1: washout + 1 + all_preds.shape[1]]
-                true_t = np.arange(len(true)) * dt
 
-                ax.fill_between(times, mean_pred - std_pred, mean_pred + std_pred, alpha=0.2, label="±1σ")
-                ax.plot(times, mean_pred, 'o-', markersize=2, label="Mean Prediction")
+                # --- time axes ---
+                t_dt   = np.arange(len(mean_pred)) * dt
+                t_fine = np.arange(len(z_test)) * acc_dt  # high-res for pretty plotting
+
+                # --- draw ---
+                # 1) smooth high-res truth (visual only)
+                ax.plot(t_fine, z_test, '-', linewidth=1.2, color='green', label='True (acc_dt)')
+
+                # 2) the dt truth actually used for MAE/fit (markers only)
+                ax.plot(t_dt, true_dt, 'o', markersize=1, color='darkgreen', alpha=0.8, label='True (dt samples)')
+
+                # 3) ESN predictions (dt)
+                ax.fill_between(t_dt, mean_pred - std_pred, mean_pred + std_pred, alpha=0.2, label="±1σ")
+                ax.plot(t_dt, mean_pred, 'o-', markersize=2, label="Mean Prediction")
                 for i, ipreds in enumerate(all_preds):
-                    ax.plot(times, ipreds, label=f"ESNS {i}")
-                ax.plot(true_t, true, '-', linewidth=1.2, label='True ⟨σ_z⟩')
+                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.6, label=f"ESNS {i}")
+
                 ax.set_xlim(0, 15)
                 ax.set_title(f"N={N}, Qubit={qubit}")
                 ax.set_xlabel("Time")
@@ -1023,6 +1046,7 @@ if __name__ == '__main__':
                 fig_path = os.path.join(model_dir, f"official_overlay_{base_name}.pdf")
                 fig.savefig(fig_path)
                 print(f"Saved overlay plot to {fig_path}")
+
                 
         # Save diagnostics summary
         diag_path_json = os.path.join(model_dir, "physics_summary.json")
