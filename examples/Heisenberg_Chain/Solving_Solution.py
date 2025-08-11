@@ -8,7 +8,7 @@ from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
 from qutip import Qobj, sigmaz, expect
-
+import pandas as pd
 
 import warnings
 warnings.filterwarnings(
@@ -743,14 +743,14 @@ if __name__ == '__main__':
     T              = 100
     N_list         = [5]
     train_seed     = 31
-    reservoir_seed  = 31415
+    reservoir_seed  = 310
     pred_seed     = 31415
     qubit_list     = [0,1,2]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 200 # Number of time series used to train 1 ESN
-    testing_depth  = 1 # Number of ESNs trained
+    training_depth = 400 # Number of time series used to train 1 ESN
+    testing_depth  = 200 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
     do_tune        = False  # run Optuna tuning
@@ -1083,12 +1083,12 @@ if __name__ == '__main__':
                 )
 
                 # Load the ESN named after the TRAIN seed (Ex0 by convention) -- for the per-dataset metrics
-                model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_{base_name}_Ex0.pt")
-                if not os.path.exists(model_path):
-                    # fall back to original single-model name if needed
-                    alt_path = os.path.join(model_dir, f"trainedmodel_{N}_{qubit_tag}.pt")
-                    if os.path.exists(alt_path):
-                        model_path = alt_path
+                model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed{reservoir_seed}_{base_name}.pt")
+                # if not os.path.exists(model_path):
+                #     # fall back to original single-model name if needed
+                #     alt_path = os.path.join(model_dir, f"trainedmodel_{N}_{qubit_tag}.pt")
+                #     if os.path.exists(alt_path):
+                #         model_path = alt_path
 
                 if os.path.exists(model_path):
                     print(f"Loading ESN from {model_path}")
@@ -1165,7 +1165,7 @@ if __name__ == '__main__':
 
                 # ── Part B: NEW — histogram over ESNs with varying rseed (dataset 0 only) ──
                 # Find all ESNs trained by official_run for this (N, qubit), any rseed / Ex index
-                pattern = os.path.join(model_dir, f"trainedmodel_Seed*_{base_name}_Ex*.pt")
+                pattern = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed*_{base_name}.pt")
                 esn_paths = sorted(glob(pattern))
                 if not esn_paths:
                     print(f"[hist] No ESN files found for pattern: {pattern}")
