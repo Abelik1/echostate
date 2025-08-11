@@ -26,6 +26,8 @@ class HeisenbergChain:
         # Precompute U = exp(-i H dt)
         self.U = (-1j * self.H * self.dt).expm()
         
+        self.norm_history = []
+        self.energy_history = []
         # History of expectation values or reduced density matrices
         self.sz_history = []
         
@@ -50,26 +52,39 @@ class HeisenbergChain:
         return H
 
     def evolve(self, steps: int, store_reduced=False):
+
         sz_op = tensor(*[sigmaz() if idx == self.k else qeye(2) for idx in range(self.N)])
 
         # Initialize Qobj from state vector
         psi_qobj = Qobj(self.psi, dims=[[2]*self.N, [1]*self.N])
 
-        # Record initial value
+        # --- record initial norm & energy (robust to QuTiP returning complex scalars) ---
+        norm0 = float(np.vdot(self.psi, self.psi).real)    # ||psi||^2
+        self.norm_history.append(norm0)
+
+        e0 = expect(self.H, psi_qobj)                      # complex scalar
+        self.energy_history.append(float(e0.real))
+
+        # Record initial observable
         if store_reduced:
-            # Store reduced density matrix ρ_k of target qubit
             rho_k = psi_qobj.ptrace(self.k)
             self.sz_history.append(rho_k.full())
         else:
-            # Store expectation value ⟨σ_z⟩ for target qubit
             val = expect(sz_op, psi_qobj)
             self.sz_history.append(val)
 
-        # Evolve state over 'steps' time steps
+        # Evolve
         for _ in range(steps):
             psi_qobj = self.U * psi_qobj
             self.psi = psi_qobj.full().flatten()
             self.psi /= np.linalg.norm(self.psi)
+
+            # --- record step norm & energy ---
+            n = float(np.vdot(self.psi, self.psi).real)    # stays ~1.0 by construction
+            self.norm_history.append(n)
+
+            e = expect(self.H, psi_qobj)
+            self.energy_history.append(float(e.real))
 
             if store_reduced:
                 rho_k = psi_qobj.ptrace(self.k)
@@ -77,6 +92,7 @@ class HeisenbergChain:
             else:
                 val = expect(sz_op, psi_qobj)
                 self.sz_history.append(val)
+
 
     def get_sz(self, t=None):
         """Get stored ⟨σ_z⟩ or reduced density matrix at time t (or full history if t is None)."""
