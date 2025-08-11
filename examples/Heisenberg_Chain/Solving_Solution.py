@@ -300,7 +300,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             washout=washout, seed=seed,
             reservoir_limit=[700, 1000],
             spectral_radius_limit=[0.1, 2],
-            feedback_limit=1,
+            feedback_limit=[1,4],
             input_scaling_limit=[1.0, 3.0],
             ridge_param_limit=[1e-8, 1],
             leak_rate_limit=[0.2, 1.0],
@@ -741,27 +741,27 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [5]
-    train_seed     = 31
-    reservoir_seed  = 310
+    N_list         = [3]
+    train_seed     = 31415
+    reservoir_seed  = 31415
     pred_seed     = 31415
-    qubit_list     = [0,1,2]       # list of qubit indices
+    qubit_list     = [0]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 400 # Number of time series used to train 1 ESN
-    testing_depth  = 200 # Number of ESNs trained
+    training_depth = 50 # Number of time series used to train 1 ESN
+    testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = False  # run Optuna tuning
+    do_tune        = True  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
-    official_run   = False   # run ensemble of ESNs & shaded plot
-    do_predictions = True
+    official_run   = True   # run ensemble of ESNs & shaded plot
+    do_predictions = False
     
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
-    n_trials   = 3
+    n_trials   = 80
     num_pred      = 40 
 
     # ─── Preload high-res reference & (for single/official) test history ───
