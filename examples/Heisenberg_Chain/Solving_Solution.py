@@ -301,7 +301,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             reservoir_limit=[700, 1000],
             spectral_radius_limit=[0.1, 2],
             feedback_limit=[1,4],
-            input_scaling_limit=[1.0, 3.0],
+            input_scaling_limit=[0.05,2.0],
             ridge_param_limit=[1e-8, 1],
             leak_rate_limit=[0.2, 1.0],
             sparsity_limit=[0.1, 1.0],
@@ -753,7 +753,7 @@ if __name__ == '__main__':
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = True  # run Optuna tuning
+    do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     official_run   = True   # run ensemble of ESNs & shaded plot
     do_predictions = False
@@ -909,14 +909,14 @@ if __name__ == '__main__':
 
                     # fresh ESN for each seed (lazily constructed)
                     esn = predictor.make_esn(
-                        reservoir_size=best.get("reservoir_size", 900),
-                        spectral_radius=best.get("spectral_radius", 1.25),
-                        input_scaling=best.get("input_scaling", 0.55),
+                        reservoir_size=best.get("reservoir_size", 2347),
+                        spectral_radius=best.get("spectral_radius",  1.56526),
+                        input_scaling=best.get("input_scaling", 0.9480),
                         ridge_param=best.get("ridge_param", 1e-1),
-                        leak_rate=best.get("leak_rate", 0.9),
-                        sparsity=best.get("sparsity", 0.2),
-                        feedback=best.get("feedback", 1),
-                        bias_scaling=best.get("bias_scaling", 0.4),
+                        leak_rate=best.get("leak_rate", 0.1947),
+                        sparsity=best.get("sparsity", 0.15286),
+                        feedback=best.get("feedback", 2),
+                        bias_scaling=best.get("bias_scaling", 0.277),
                         seed=rseed
                     )
 
@@ -940,8 +940,17 @@ if __name__ == '__main__':
                         "feedback": best.get("feedback", 1),
                         "bias_scaling": best.get("bias_scaling", 0.4)
                     })
-
-                    pred, true = predictor.predict_sequence(esn, z_test)
+                    if not np.isclose(dt, acc_dt):
+                        ratio = dt / acc_dt
+                        k = int(round(ratio))
+                        if not np.isclose(k * acc_dt, dt):
+                            raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
+                        z_eval = z_test[::k]  # downsample high-res to training step
+                    else:
+                        z_eval = z_test
+                    pred, true = predictor.predict_sequence(esn, z_eval)
+                    
+                  
                     all_preds.append(pred)
 
                     mae = mean_absolute_error(torch.tensor(pred), torch.tensor(true)).item()
