@@ -66,150 +66,109 @@ class ESN(torch.nn.Module):
         self.W_out = None
         self._batch_bias = None
 
-    def _ensure_batch_bias(self, size: int):
-        """
-        Return a bias column of shape (size, 1) on the correct device.
-        Rebuilds if the cached buffer isn't the requested size.
-        """
-        if (self._batch_bias is None) or (self._batch_bias.shape[0] != size):
-            self._batch_bias = torch.ones(size, 1, device=self.device) * self.bias_scaling
+    def _ensure_batch_bias(self, B):
+        size = self.batch_size or B
+        if self._batch_bias is None or self._batch_bias.shape[0] != size:
+            bias = torch.ones(size, 1, device=self.device) * self.bias_scaling
+            self._batch_bias = bias
         return self._batch_bias
 
-    def fit(self, inputs: torch.Tensor, targets: torch.Tensor, *, debug: bool = False) -> torch.Tensor:
+    def fit(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
-        Teacher-forced training with explicit *per-series* reset and washout.
-        For each series b:
-        - reset x and feedback
-        - run 'washout' steps (not collected)
-        - collect states/targets for t in [washout, T-1]
-        Solves a single ridge regression on the stacked design matrix.
+        Teacher-forced training with progressive history:
+        at step t, inputs are [X_t, z_{t-1}, z_{t-2}, ...] and target is Y_t (= z_{t+1})
+        We collect states after washout and solve a single ridge regression.
         """
-        # Accept list[(T,D)] or tensor (B,T,D)
+        # stack list input
         if isinstance(inputs, list):
             inputs  = torch.stack(inputs,  dim=0)
             targets = torch.stack(targets, dim=0)
 
         B, T, _ = inputs.shape
-        X = inputs.to(self.device)
+        X = inputs.to(self.device)    # no extra input scaling here
         Y = targets.to(self.device)
 
-        if self.washout >= T:
-            raise ValueError(f"washout ({self.washout}) must be < sequence length T ({T}).")
+        # initial reservoir state + feedback buffer (holds past outputs)
+        x = torch.zeros(B, self.reservoir_size, device=self.device)
+        prev_fb = torch.zeros(B, self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
 
-        state_rows = []
-        target_rows = []
-
-        if debug:
-            print(f"[ESN.fit] B={B}, T={T}, base_in={self.base_input_dim}, out_dim={self.output_dim}, "
-                f"reservoir={self.reservoir_size}, washout={self.washout}, leak={self.leak_rate}, fb={self.feedback}")
-
-        # ---- loop over series; hard reset per-series ----
-        for b in range(B):
-            # reset reservoir state and feedback for THIS series
-            x = torch.zeros(1, self.reservoir_size, device=self.device)
-            prev_fb = torch.zeros(1, self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
-
-            # 1) washout (not collected)
-            for t in range(self.washout):
-                u_base = X[b:b+1, t, :]                       # (1, base_in)
-                if self.feedback > 0:
-                    u = torch.cat([u_base, prev_fb], dim=1)   # (1, base_in + fb*out_dim)
-                else:
-                    u = u_base
-                x = self.reservoir.update_batch(x, u, self.leak_rate)
-                if self.feedback > 0:
-                    # NOTE: preserves your current "input-as-feedback" choice.
-                    prev_fb = torch.cat([prev_fb[:, self.output_dim:], u_base], dim=1)
-
-            if debug and (b < 3 or b == B-1):  # sample a few series
-                xm = float(x.abs().mean().item())
-                xs = float(x.std(unbiased=False).item())
-                print(f"[ESN.fit] After washout — series {b}: mean|x|={xm:.3e}, std(x)={xs:.3e}")
-
-            # 2) collect (t = washout .. T-1)
-            for t in range(self.washout, T):
-                u_base = X[b:b+1, t, :]
-                if self.feedback > 0:
-                    u = torch.cat([u_base, prev_fb], dim=1)
-                else:
-                    u = u_base
-
-                x = self.reservoir.update_batch(x, u, self.leak_rate)
-
-                xb = torch.cat([x, self._ensure_batch_bias(1)], dim=1)  # (1, res+1)
-                state_rows.append(xb)
-                target_rows.append(Y[b:b+1, t, :])                      # aligned within series
-
-                if self.feedback > 0:
-                    prev_fb = torch.cat([prev_fb[:, self.output_dim:], u_base], dim=1)
-
-        # Stack and solve
-        X_all = torch.cat(state_rows,  dim=0)  # (#rows, res+1)
-        Y_all = torch.cat(target_rows, dim=0)  # (#rows, out_dim)
-
-        if debug:
-            has_nan = torch.isnan(X_all).any() or torch.isnan(Y_all).any()
-            has_inf = torch.isinf(X_all).any() or torch.isinf(Y_all).any()
-            print(f"[ESN.fit] Design rows={X_all.shape[0]}, features={X_all.shape[1]}; "
-                f"NaN? {bool(has_nan)}, Inf? {bool(has_inf)}")
-
-        self.W_out = self.trainer.fit(X_all, Y_all)
-
-        if debug:
-            try:
-                self.trainer.debug_covariance()
-            except Exception as e:
-                print(f"[ESN.fit][warn] covariance debug failed: {e}")
-            w_norm = float(self.W_out.norm().item())
-            w_max  = float(self.W_out.abs().max().item())
-            print(f"[ESN.fit] W_out: ||W||_F={w_norm:.3e}, max|W|={w_max:.3e}")
-
-        return self.W_out
-
-
-
-    def forward(self, inputs: torch.Tensor, *, closed_loop_after_washout: bool = True, debug: bool = False) -> torch.Tensor:
-        assert self.W_out is not None, "Model must be fit before forward()"
-        T, _ = inputs.shape
-        X = inputs.to(self.device)
-
-        x = torch.zeros(self.reservoir_size, device=self.device)
-        preds = []
-        prev_fb = torch.zeros(self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
-        last_y = None
-
-        if debug:
-            print(f"[ESN.forward] T={T}, washout={self.washout}, closed_after={closed_loop_after_washout}")
+        state_list, target_list = [], []
 
         for t in range(T):
-            use_closed = closed_loop_after_washout and (t >= self.washout) and (last_y is not None)
-            u_base = last_y if use_closed else X[t:t+1, :]
+            # base input is the current truth at t (teacher forcing)
+            u_base = X[:, t, :]   # shape (B, base_input_dim)
 
+            # concat feedback = strictly older truths [z_{t-1}, z_{t-2}, ...]
             if self.feedback > 0:
-                u = torch.cat([u_base, prev_fb.unsqueeze(0)], dim=1)
+                u = torch.cat([u_base, prev_fb], dim=1)  # (B, base + fb*out)
             else:
                 u = u_base
 
+            # reservoir update
             x = self.reservoir.update_batch(x, u, self.leak_rate)
-            xb = torch.cat([x, self._ensure_batch_bias(1)], dim=1)    # bias is (1,1)
-            y = xb @ self.W_out.T
+
+            # collect states/targets after washout
+            if t >= self.washout:
+                bias_vec = self._ensure_batch_bias(B)          # (B,1)
+                xb = torch.cat([x, bias_vec], dim=1)           # (B, res+1)
+                state_list.append(xb)
+                target_list.append(Y[:, t, :])                 # aligned with z_{t+1}
+
+            # update feedback buffer with *current* truth so at (t+1) it holds [z_t, z_{t-1}, ...]
+            if self.feedback > 0:
+                prev_fb = torch.cat([prev_fb[:, self.output_dim:], u_base], dim=1)
+
+        # solve readout in one shot
+        X_all = torch.cat(state_list,  dim=0)   # (B*(T-washout), res+1)
+        Y_all = torch.cat(target_list, dim=0)   # (B*(T-washout), out_dim)
+        self.W_out = self.trainer.fit(X_all, Y_all)
+        return self.W_out
+
+    def forward(self, inputs: torch.Tensor, *, closed_loop_after_washout: bool = True) -> torch.Tensor:
+        """
+        Inference with closed-loop after washout:
+        - for t < washout: base input = X[t] (truth warm-up), feedback uses past truths
+        - for t >= washout: base input = last prediction, feedback uses older predictions
+        Returns predictions trimmed by washout: out[washout:].
+        """
+        assert self.W_out is not None, "Model must be fit before forward()"
+        T, _ = inputs.shape
+        X = inputs.to(self.device)    # no extra input scaling here
+
+        x = torch.zeros(self.reservoir_size, device=self.device)
+        preds = []
+
+        prev_fb = torch.zeros(self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
+        last_y = None  # shape (1, output_dim)
+
+        for t in range(T):
+            use_closed = closed_loop_after_washout and (t >= self.washout) and (last_y is not None)
+
+            # base input: truth during warm-up; then switch to previous prediction
+            u_base = last_y if use_closed else X[t:t+1, :]      # shape (1, base_input_dim)
+
+            # concat feedback from *older* items (prev_fb holds up-to-(t-1) history)
+            if self.feedback > 0:
+                u = torch.cat([u_base, prev_fb.unsqueeze(0)], dim=1)  # (1, base + fb*out)
+            else:
+                u = u_base
+
+            # reservoir update + readout
+            x = self.reservoir.update_batch(x, u, self.leak_rate)
+            bias_vec = self._ensure_batch_bias(1)
+            xb = torch.cat([x, bias_vec[:1]], dim=1)            # (1, res+1)
+            y = xb @ self.W_out.T                               # (1, out_dim)
             preds.append(y.squeeze(0))
 
+            # feedback buffer now shifts in the *current base input*
+            #  - during warm-up this is the truth X[t]
+            #  - after washout this is the last prediction last_y
             if self.feedback > 0:
-                # same "input-as-feedback" convention as fit()
                 prev_fb = torch.cat([prev_fb[self.output_dim:], u_base.squeeze(0)], dim=0)
 
             last_y = y
 
-            if debug and t in (self.washout-1, self.washout, self.washout+1):
-                print(f"[ESN.forward] t={t} {'(switch)' if use_closed else '(warmup)'} "
-                    f"| mean|x|={float(x.abs().mean()):.3e}, y.max={float(y.abs().max()):.3e}")
-
         out = torch.stack(preds, dim=0)
-        if debug:
-            op = out[self.washout:]
-            print(f"[ESN.forward] post-washout preds: shape={op.shape}, "
-                f"max|pred|={float(op.abs().max()):.3e}, mean|pred|={float(op.abs().mean()):.3e}")
         return out[self.washout:]
 
 
@@ -228,7 +187,7 @@ class ESN(torch.nn.Module):
             P = torch.cat(preds, dim=0)
             T = torch.cat([t[self.washout:] for t in target_list], dim=0)
             if False:
-                 # Plot the first `plot_limit` sequences individually
+                 # Plot the first plot_limit sequences individually
                 plot_limit =2
                 for idx in range(min(plot_limit, len(preds))):
                     pred_seq = preds[idx].cpu().numpy()

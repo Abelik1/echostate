@@ -153,9 +153,10 @@ class ESNPredictor:
         return esn
 
     def train_esn(self, esn):
+        """Fit a provided ESN on the prepared dataset."""
         inputs, targets = self.build_dataset()
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
-        esn.fit(inputs, targets, debug=True)   # <-- enable debug temporarily
+        esn.fit(inputs, targets)
 
     def predict_sequence(self, esn, z_test):
         """
@@ -166,7 +167,6 @@ class ESNPredictor:
         preds = esn.predict(X_test)[0].detach().cpu().numpy().flatten()
         true = z_test[self.washout+1: self.washout+1 + len(preds)]
         return preds, true
-
 
 #region Physical TESTS
 def summarize(arr):
@@ -1217,7 +1217,7 @@ if __name__ == '__main__':
                             label="ESN members" if label_once else None)
                     label_once = False
 
-                ax.set_xlim(65, 85)
+                ax.set_xlim(65, 86)
                 ax.set_title(f"N={N}, Qubit={qubit}")
                 ax.set_xlabel("Time")
                 ax.set_ylabel("⟨σ_z⟩")
@@ -1263,6 +1263,11 @@ if __name__ == '__main__':
             json.dump(config_records, f, indent=4)
             print("Saved ESN config log to official_run_esn_configs.json")
 
+
+
+    # render_physics_report("./examples/Heisenberg_Chain/cache/physics_summary.json")
+    # scorecard_physics("./examples/Heisenberg_Chain/cache/physics_summary.json")
+    plt.show()
 
 
     # render_physics_report("./examples/Heisenberg_Chain/cache/physics_summary.json")
