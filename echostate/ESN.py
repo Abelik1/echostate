@@ -66,11 +66,10 @@ class ESN(torch.nn.Module):
         self.W_out = None
         self._batch_bias = None
 
-    def _ensure_batch_bias(self, B):
-        size = self.batch_size or B
-        if self._batch_bias is None or self._batch_bias.shape[0] != size:
-            bias = torch.ones(size, 1, device=self.device) * self.bias_scaling
-            self._batch_bias = bias
+    def _ensure_batch_bias(self, batch_sz: int) -> torch.Tensor:
+        """Return a (batch_sz, 1) bias on the right device; resize if needed."""
+        if self._batch_bias is None or self._batch_bias.shape[0] != batch_sz:
+          self._batch_bias = torch.ones(batch_sz, 1, device=self.device) * self.bias_scaling
         return self._batch_bias
 
     def fit(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -109,7 +108,7 @@ class ESN(torch.nn.Module):
 
             # collect states/targets after washout
             if t >= self.washout:
-                bias_vec = self._ensure_batch_bias(B)          # (B,1)
+                bias_vec = self._ensure_batch_bias(x.shape[0]) # (B,1)
                 xb = torch.cat([x, bias_vec], dim=1)           # (B, res+1)
                 state_list.append(xb)
                 target_list.append(Y[:, t, :])                 # aligned with z_{t+1}
@@ -155,9 +154,10 @@ class ESN(torch.nn.Module):
 
             # reservoir update + readout
             x = self.reservoir.update_batch(x, u, self.leak_rate)
-            bias_vec = self._ensure_batch_bias(1)
-            xb = torch.cat([x, bias_vec[:1]], dim=1)            # (1, res+1)
+            bias_vec = self._ensure_batch_bias(x.shape[0])      # x is (1, res)
+            xb = torch.cat([x, bias_vec], dim=1)                # (1, res+1)
             y = xb @ self.W_out.T                               # (1, out_dim)
+            assert x.dim() == 2 and bias_vec.shape == (x.shape[0], 1)
             preds.append(y.squeeze(0))
 
             # feedback buffer now shifts in the *current base input*

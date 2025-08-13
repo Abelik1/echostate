@@ -297,14 +297,14 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit=[10,200],
+            reservoir_limit=[20,300],
             spectral_radius_limit=[0.2,0.9],
             feedback_limit=0,
             input_scaling_limit=[0.01,2.0],
             ridge_param_limit=[1e-7, 1.0],
             leak_rate_limit=[0.1, 0.99],
-            sparsity_limit=[0.12,1.0],
-            bias_scaling_limit=0,
+            sparsity_limit=[0.1,0.8],
+            bias_scaling_limit=1.0,
             device=predictor.device,
             learning_algo="inv"
         )
@@ -741,14 +741,14 @@ if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
     N_list         = [2]
-    train_seed     = 3141
-    reservoir_seed  = 3141
-    pred_seed     = 3141
+    train_seed     = 314
+    reservoir_seed  = 314
+    pred_seed     = 314
     qubit_list     = [0,1]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 50 # Number of time series used to train 1 ESN
+    training_depth = 1000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
@@ -1112,7 +1112,7 @@ if __name__ == '__main__':
                 diagnostic_rows.append({"simulator_checks": sim_diag})
                 seeds = [reservoir_seed + i for i in range(testing_depth)]
                 all_preds = []
-                base_name = f"N{N}_{qubit_tag}_dt{fmt_dt_val}"
+                base_name = f"batchSize{training_depth}_{qubit_tag}_dt{fmt_dt_val}"
 
                 # Build the dt stream used for ESN evaluation ONCE
                 if not np.isclose(dt, acc_dt):
@@ -1136,7 +1136,7 @@ if __name__ == '__main__':
                         leak_rate=best.get("leak_rate", 0.9),
                         sparsity=best.get("sparsity", 0.1),
                         feedback=best.get("feedback", 0),
-                        bias_scaling=best.get("bias_scaling", 0),
+                        bias_scaling=best.get("bias_scaling", 1.0),
                         seed=rseed
                     )
 
