@@ -153,10 +153,9 @@ class ESNPredictor:
         return esn
 
     def train_esn(self, esn):
-        """Fit a provided ESN on the prepared dataset."""
         inputs, targets = self.build_dataset()
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
-        esn.fit(inputs, targets)
+        esn.fit(inputs, targets, debug=True)   # <-- enable debug temporarily
 
     def predict_sequence(self, esn, z_test):
         """
@@ -165,7 +164,7 @@ class ESNPredictor:
         """
         X_test = torch.tensor(z_test[:-1], dtype=torch.float32, device=self.device).unsqueeze(-1).unsqueeze(0)
         preds = esn.predict(X_test)[0].detach().cpu().numpy().flatten()
-        true = z_test[self.washout + 1: self.washout + 1 + len(preds)]
+        true = z_test[self.washout+1: self.washout+1 + len(preds)]
         return preds, true
 
 
@@ -298,14 +297,14 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit=[400, 5000],
-            spectral_radius_limit=[0.1, 2],
-            feedback_limit=[1,2],
-            input_scaling_limit=[0.05,2.0],
-            ridge_param_limit=[1e-8, 1],
-            leak_rate_limit=[0.2, 1.0],
-            sparsity_limit=[0.05, 0.2],
-            bias_scaling_limit=[0.05, 0.95],
+            reservoir_limit=[10,200],
+            spectral_radius_limit=[0.2,0.9],
+            feedback_limit=0,
+            input_scaling_limit=[0.01,2.0],
+            ridge_param_limit=[1e-7, 1.0],
+            leak_rate_limit=[0.1, 0.99],
+            sparsity_limit=[0.12,1.0],
+            bias_scaling_limit=0,
             device=predictor.device,
             learning_algo="inv"
         )
@@ -741,11 +740,11 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [3]
-    train_seed     = 31415
-    reservoir_seed  = 31415
-    pred_seed     = 31415
-    qubit_list     = [0,1,2]       # list of qubit indices
+    N_list         = [2]
+    train_seed     = 3141
+    reservoir_seed  = 3141
+    pred_seed     = 3141
+    qubit_list     = [0,1]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
@@ -753,15 +752,16 @@ if __name__ == '__main__':
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = True  # run Optuna tuning
+    do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
-    official_run   = True   # run ensemble of ESNs & shaded plot
     do_predictions = False
+    official_run   = True   # run ensemble of ESNs & shaded plot
+    
     
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
-    n_trials   = 80
+    n_trials   = 2000
     num_pred      = 40 
 
     # ─── Preload high-res reference & (for single/official) test history ───
@@ -785,273 +785,41 @@ if __name__ == '__main__':
         plot_hyperparams_vs_N("./examples/Heisenberg_Chain/trained_esns/")
 #region tune
     elif do_tune:
-        predictor = ESNPredictor(
-            steps=int(T/dt), dt=dt,
-            N=N_list[0], qubit=qubit_list[0],
-            history_values=None,
-            washout=washout,
-            batch_size=training_depth,
-            training_depth=training_depth,
-            history_seed=train_seed,
-            reservoir_seed=reservoir_seed,
-            device=device
-        )
-
-        fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
-        qubit_tag = f"Qbts({(0 if ignore_qubit else qubit_list[0]) + 1}){N_list[0]}"
-        extra_wash = 75 if ignore_washout else washout
-        param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
-        study_name = f"esnStudy_Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht75"
-        print(study_name)
-        study_dir  = "./examples/Heisenberg_Chain/trained_esns/"
-        print(param_name)
-
-        Heisen_tune(
-            predictor,
-            study_name=study_name,
-            study_loc=study_dir,
-            washout=washout,
-            seed=train_seed,
-            n_trials=n_trials,
-            param_name=param_name,
-            dt=dt,
-            plots=False
-        )
-#region official run
-    elif official_run:
-
-        model_dir = "./examples/Heisenberg_Chain/cache/"
-        param_dir = "./examples/Heisenberg_Chain/trained_esns/"
-        os.makedirs(model_dir, exist_ok=True)
-
-        mae_records = []
-        config_records = []
-        n_rows = len(N_list)
-        n_cols = len(qubit_list)
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False)
-        diagnostic_rows = []
-        for row_idx, N in enumerate(N_list):
-            per_qubit_true = {}
-            per_qubit_pred = {}
-            for col_idx, qubit in enumerate(qubit_list):
-                print(f"\nSolving N={N}, qubit={qubit}")
-
-                steps = int(T / dt)
-                fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
-                qubit_tag = f"Qbts({(0 if ignore_qubit else qubit) + 1}){N}"
-                extra_wash = 75 if ignore_washout else washout
-                param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
-                print(param_name)
-                best_param_file = os.path.join(param_dir, f"bestparams_{param_name}.json")
-
-                # Load best hyperparameters
-                try:
-                    with open(best_param_file, 'r') as f:
-                        all_best = json.load(f)
-                    best = all_best.get(str(round(dt, 5)), {})
-                    print("Loaded best parameters:" if best else "No best parameters found for current dt.")
-                except (FileNotFoundError, json.JSONDecodeError):
-                    best = {}
-                    print("No best parameter file found. Using defaults.")
-
-                # Predictor only for data orchestration
-                predictor = ESNPredictor(
-                    steps=steps,
-                    dt=dt,
-                    N=N,
-                    qubit=(qubit if not ignore_qubit else 0),
-                    history_values=None,
-                    washout=washout,
-                    batch_size=training_depth,
-                    training_depth=training_depth,
-                    history_seed=train_seed,
-                    reservoir_seed=reservoir_seed,
-                    device=device
-                )
-
-                # High-res reference (test) sequence for this (N,qubit)
-                np.random.seed(train_seed)
-                acc_chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt)
-                acc_chain.evolve(int(T / acc_dt), store_reduced=True)
-                raw = acc_chain.get_sz()
-                z_test = np.asarray([
-                    float(expect(sigmaz(), Qobj(rho, dims=[[2], [2]])))
-                    for rho in raw
-                ])
-                
-                # true-unitary checks for this qubit’s run
-                sim_diag = {
-                    "N": N, "qubit": qubit,
-                    "norm_summary": summarize(acc_chain.norm_history),
-                    "energy_summary": summarize(acc_chain.energy_history),
-                    "norm_drift": drift_stats(acc_chain.norm_history),
-                    "energy_drift": drift_stats(acc_chain.energy_history),
-                }
-
-                # single-qubit purity when store_reduced=True
-                # acc_chain.sz_history contains ρ_k(t) (complex 2x2 arrays)
-                rho_seq = acc_chain.get_sz()  # list/array of 2x2
-                purity = []
-                for rho in rho_seq:
-                    # rho is 2x2 complex ndarray
-                    purity.append(float(np.real(np.trace(rho @ rho))))
-                sim_diag["purity_summary"] = summarize(purity)
-                sim_diag["purity_min"] = float(np.min(purity))
-                sim_diag["purity_max"] = float(np.max(purity))
-
-                diagnostic_rows.append({"simulator_checks": sim_diag})
-                seeds = [reservoir_seed + i for i in range(testing_depth)]
-                all_preds = []
-                base_name = f"N{N}_{qubit_tag}_dt{fmt_dt_val}"
-
-                # Build the dt stream used for ESN evaluation ONCE
-                if not np.isclose(dt, acc_dt):
-                    ratio = dt / acc_dt
-                    k = int(round(ratio))
-                    if not np.isclose(k * acc_dt, dt):
-                        raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
-                else:
-                    k = 1
-                z_eval = z_test[::k]
-
-                for i, rseed in enumerate(seeds):
-                    model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed{rseed}_{base_name}.pt")
-
-                    # fresh ESN for each seed (lazily constructed)
-                    esn = predictor.make_esn(
-                        reservoir_size=best.get("reservoir_size", 2347),
-                        spectral_radius=best.get("spectral_radius", 1.56526),
-                        input_scaling=best.get("input_scaling", 0.9480),
-                        ridge_param=best.get("ridge_param", 1e-1),
-                        leak_rate=best.get("leak_rate", 0.1947),
-                        sparsity=best.get("sparsity", 0.15286),
-                        feedback=best.get("feedback", 2),
-                        bias_scaling=best.get("bias_scaling", 0.277),
-                        seed=rseed
-                    )
-
-                    if os.path.exists(model_path):
-                        print(f"Loading existing ESN Ex{i} (seed={rseed})")
-                        esn = torch.load(model_path, weights_only=False)
-                        esn.to(device).eval()
-                    else:
-                        print(f"Training ESN Ex{i} (seed={rseed})")
-                        predictor.train_esn(esn)
-                        torch.save(esn, model_path)
-
-                    # Log the params you ACTUALLY used (not the old defaults)
-                    config_records.append({
-                        "N": N, "qubit": qubit, "Ex": i, "seed": rseed,
-                        "reservoir_size": best.get("reservoir_size", 2347),
-                        "spectral_radius": best.get("spectral_radius", 1.56526),
-                        "input_scaling": best.get("input_scaling", 0.9480),
-                        "ridge_param": best.get("ridge_param", 1e-1),
-                        "leak_rate": best.get("leak_rate", 0.1947),
-                        "sparsity": best.get("sparsity", 0.15286),
-                        "feedback": best.get("feedback", 2),
-                        "bias_scaling": best.get("bias_scaling", 0.277)
-                    })
-
-                    pred, true = predictor.predict_sequence(esn, z_eval)
-                    all_preds.append(pred)
-
-                    mae = mean_absolute_error(torch.tensor(pred), torch.tensor(true)).item()
-                    mae_records.append({"N": N, "qubit": qubit, "Ex": i, "seed": rseed, "MAE": mae})
-
-                # ---------- Plot overlay (dt metrics + high-res visuals) ----------
-                ax = axs[row_idx][col_idx]
-                all_preds = np.stack(all_preds)
-                mean_pred = all_preds.mean(axis=0)
-                std_pred  = all_preds.std(axis=0)
-
-                # truth aligned to predictions at dt (washout already applied inside predict)
-                true_dt = z_eval[washout + 1 : washout + 1 + mean_pred.shape[0]]
-                T_eff   = min(len(true_dt), len(mean_pred))
-                true_dt = true_dt[:T_eff]
-                mean_pred = mean_pred[:T_eff]
-                std_pred  = std_pred[:T_eff]
-
-                # record per-qubit series at dt (used later for diagnostics / magnetization)
-                per_qubit_true[qubit] = true_dt.copy()
-                per_qubit_pred[qubit] = mean_pred.copy()
-
-                # one per-qubit diagnostic block (no duplicates)
-                per_qubit_diag = {
-                    "N": N, "qubit": qubit,
-                    "pred_summary": summarize(mean_pred),
-                    "true_summary": summarize(true_dt),
-                    "pred_bounds": check_bounds(mean_pred),
-                    "acf1_pred": autocorr_lag1(mean_pred),
-                    "acf1_true": autocorr_lag1(true_dt),
-                    "series_error": compare_series(mean_pred, true_dt),
-                }
-                diagnostic_rows.append(per_qubit_diag)
-
-                # time axes — RELATIVE (start at t = (washout+1)*dt)
-                t_dt   = np.arange(len(mean_pred)) * dt
-                t0     = (washout + 1) * dt
-                start_hi = int(round(t0 / acc_dt))
-                t_fine_rel = np.arange(len(z_test)) * acc_dt - t0
-
-                # draw
-                ax.plot(t_fine_rel[start_hi:], z_test[start_hi:], '-', lw=1.2, color='green', label='True (acc_dt)')
-                ax.plot(t_dt, true_dt, 'o', ms=1, color='darkgreen', alpha=0.8)
-
-                ax.fill_between(t_dt, mean_pred - std_pred, mean_pred + std_pred, alpha=0.2, label="±1σ")
-                ax.plot(t_dt, mean_pred, 'o-', ms=2, label="Mean Prediction")
-
-                # label ensemble members only once to avoid legend spam
-                label_once = True
-                for ipreds in all_preds:
-                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9,
-                            label="ESN members" if label_once else None)
-                    label_once = False
-
-                ax.set_xlim(0, 70)
-                ax.set_title(f"N={N}, Qubit={qubit}")
-                ax.set_xlabel("Time")
-                ax.set_ylabel("⟨σ_z⟩")
-                ax.legend()
-
-                fig_path = os.path.join(model_dir, f"official_overlay_{base_name}.pdf")
-                fig.savefig(fig_path)
-                print(f"Saved overlay plot to {fig_path}")
-
-                # ---------- (OPTIONAL) Global magnetization ----------
-                # Do this once you have ≥2 qubits recorded
-                if len(per_qubit_true) >= 2 and len(per_qubit_pred) >= 2:
-                    T_min_true = min(len(v) for v in per_qubit_true.values())
-                    T_min_pred = min(len(v) for v in per_qubit_pred.values())
-                    T_min = min(T_min_true, T_min_pred)
-
-                    Mz_true = magnetization_from_qubit_series(per_qubit_true, t_len=T_min)
-                    Mz_pred = magnetization_from_qubit_series(per_qubit_pred, t_len=T_min)
-
-                    mag_diag = {
-                        "mag_true_summary": summarize(Mz_true),
-                        "mag_pred_summary": summarize(Mz_pred),
-                        "mag_true_drift": drift_stats(Mz_true),
-                        "mag_pred_drift": drift_stats(Mz_pred),
-                        "mag_series_error": compare_series(Mz_pred, Mz_true)
-                    }
-                    diagnostic_rows.append({"global_magnetization": mag_diag})
-
-
-                
-        # Save diagnostics summary
-        diag_path_json = os.path.join(model_dir, "physics_summary.json")
-        with open(diag_path_json, "w") as f:
-            json.dump(diagnostic_rows, f, indent=2)
-        print(f"Saved physics diagnostics to {diag_path_json}")
         
-        
-        mae_df = pd.DataFrame(mae_records)
-        mae_df.to_csv(os.path.join(model_dir, "official_run_mae_summary.csv"), index=False)
-        print("Saved MAE summary to official_run_mae_summary.csv")
+        for N in N_list:
+            predictor = ESNPredictor(
+                steps=int(T/dt), dt=dt,
+                N=N, qubit=qubit_list[0],
+                history_values=None,
+                washout=washout,
+                batch_size=training_depth,
+                training_depth=training_depth,
+                history_seed=train_seed,
+                reservoir_seed=reservoir_seed,
+                device=device
+            )
 
-        with open(os.path.join(model_dir, "official_run_esn_configs.json"), 'w') as f:
-            json.dump(config_records, f, indent=4)
-            print("Saved ESN config log to official_run_esn_configs.json")
+            fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
+            qubit_tag = f"Qbts({(0 if ignore_qubit else qubit_list[0]) + 1}){N}"
+            extra_wash = 75 if ignore_washout else washout
+            param_name = f"Seed3141_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
+            study_name = f"esnStudy_Seed{train_seed}_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht75"
+            print(study_name)
+            study_dir  = "./examples/Heisenberg_Chain/trained_esns/"
+            print(param_name)
+
+            Heisen_tune(
+                predictor,
+                study_name=study_name,
+                study_loc=study_dir,
+                washout=washout,
+                seed=train_seed,
+                n_trials=n_trials,
+                param_name=param_name,
+                dt=dt,
+                plots=False
+            )
+            
 #region Predictions
     elif do_predictions:
         
@@ -1256,6 +1024,244 @@ if __name__ == '__main__':
             combo.to_csv(combo_path, index=False)
             print(f"Saved combined do_predictions scores → {combo_path}")
 
+#region official run
+    elif official_run:
+
+        model_dir = "./examples/Heisenberg_Chain/cache/"
+        param_dir = "./examples/Heisenberg_Chain/trained_esns/"
+        os.makedirs(model_dir, exist_ok=True)
+
+        mae_records = []
+        config_records = []
+        n_rows = len(N_list)
+        n_cols = len(qubit_list)
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False)
+        diagnostic_rows = []
+        for row_idx, N in enumerate(N_list):
+            per_qubit_true = {}
+            per_qubit_pred = {}
+            for col_idx, qubit in enumerate(qubit_list):
+                print(f"\nSolving N={N}, qubit={qubit}")
+
+                steps = int(T / dt)
+                fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
+                qubit_tag = f"Qbts({(0 if ignore_qubit else qubit) + 1}){N}"
+                # qubit_tag = f"Qbts({1}){N}"
+                extra_wash = 75 if ignore_washout else washout
+                param_name = f"Seed3141_Qbts({1}){N}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
+                # param_name = "Seed3141_Qbts(1)2_dt0_2_dpth50_wsht75"
+                print(param_name)
+                best_param_file = os.path.join(param_dir, f"bestparams_{param_name}.json")
+
+                # Load best hyperparameters
+                try:
+                    with open(best_param_file, 'r') as f:
+                        all_best = json.load(f)
+                    best = all_best.get(str(round(dt, 5)), {})
+                    # best = all_best.get(str(round(0.2, 5)), {})
+                    print("Loaded best parameters:" if best else "No best parameters found for current dt.")
+                except (FileNotFoundError, json.JSONDecodeError):
+                    best = {}
+                    print("No best parameter file found. Using defaults.")
+
+                # Predictor only for data orchestration
+                predictor = ESNPredictor(
+                    steps=steps,
+                    dt=dt,
+                    N=N,
+                    qubit=(qubit if not ignore_qubit else 0),
+                    history_values=None,
+                    washout=washout,
+                    batch_size=training_depth,
+                    training_depth=training_depth,
+                    history_seed=train_seed,
+                    reservoir_seed=reservoir_seed,
+                    device=device
+                )
+
+                # High-res reference (test) sequence for this (N,qubit)
+                np.random.seed(train_seed)
+                acc_chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt)
+                acc_chain.evolve(int(T / acc_dt), store_reduced=True)
+                raw = acc_chain.get_sz()
+                z_test = np.asarray([
+                    float(expect(sigmaz(), Qobj(rho, dims=[[2], [2]])))
+                    for rho in raw
+                ])
+                
+                # true-unitary checks for this qubit’s run
+                sim_diag = {
+                    "N": N, "qubit": qubit,
+                    "norm_summary": summarize(acc_chain.norm_history),
+                    "energy_summary": summarize(acc_chain.energy_history),
+                    "norm_drift": drift_stats(acc_chain.norm_history),
+                    "energy_drift": drift_stats(acc_chain.energy_history),
+                }
+
+                # single-qubit purity when store_reduced=True
+                # acc_chain.sz_history contains ρ_k(t) (complex 2x2 arrays)
+                rho_seq = acc_chain.get_sz()  # list/array of 2x2
+                purity = []
+                for rho in rho_seq:
+                    # rho is 2x2 complex ndarray
+                    purity.append(float(np.real(np.trace(rho @ rho))))
+                sim_diag["purity_summary"] = summarize(purity)
+                sim_diag["purity_min"] = float(np.min(purity))
+                sim_diag["purity_max"] = float(np.max(purity))
+
+                diagnostic_rows.append({"simulator_checks": sim_diag})
+                seeds = [reservoir_seed + i for i in range(testing_depth)]
+                all_preds = []
+                base_name = f"N{N}_{qubit_tag}_dt{fmt_dt_val}"
+
+                # Build the dt stream used for ESN evaluation ONCE
+                if not np.isclose(dt, acc_dt):
+                    ratio = dt / acc_dt
+                    k = int(round(ratio))
+                    if not np.isclose(k * acc_dt, dt):
+                        raise ValueError(f"dt/acc_dt not integer: dt={dt}, acc_dt={acc_dt}")
+                else:
+                    k = 1
+                z_eval = z_test[::k]
+
+                for i, rseed in enumerate(seeds):
+                    model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed{rseed}_{base_name}.pt")
+
+                    # fresh ESN for each seed (lazily constructed)
+                    esn = predictor.make_esn(
+                        reservoir_size=best.get("reservoir_size", 150),
+                        spectral_radius=best.get("spectral_radius", 1.6),
+                        input_scaling=best.get("input_scaling", 1.01),
+                        ridge_param=best.get("ridge_param", 1e-7),
+                        leak_rate=best.get("leak_rate", 0.9),
+                        sparsity=best.get("sparsity", 0.1),
+                        feedback=best.get("feedback", 0),
+                        bias_scaling=best.get("bias_scaling", 0),
+                        seed=rseed
+                    )
+
+                    if os.path.exists(model_path):
+                        print(f"Loading existing ESN Ex{i} (seed={rseed})")
+                        esn = torch.load(model_path, weights_only=False)
+                        esn.to(device).eval()
+                    else:
+                        print(f"Training ESN Ex{i} (seed={rseed})")
+                        predictor.train_esn(esn)
+                        torch.save(esn, model_path)
+
+                    # Log the params you ACTUALLY used (not the old defaults)
+                    config_records.append({
+                        "N": N, "qubit": qubit, "Ex": i, "seed": rseed,
+                        "reservoir_size": best.get("reservoir_size", 2347),
+                        "spectral_radius": best.get("spectral_radius", 1.56526),
+                        "input_scaling": best.get("input_scaling", 0.9480),
+                        "ridge_param": best.get("ridge_param", 1e-1),
+                        "leak_rate": best.get("leak_rate", 0.1947),
+                        "sparsity": best.get("sparsity", 0.15286),
+                        "feedback": best.get("feedback", 2),
+                        "bias_scaling": best.get("bias_scaling", 0.277)
+                    })
+
+                    pred, true = predictor.predict_sequence(esn, z_eval)
+                    all_preds.append(pred)
+
+                    mae = mean_absolute_error(torch.tensor(pred), torch.tensor(true)).item()
+                    mae_records.append({"N": N, "qubit": qubit, "Ex": i, "seed": rseed, "MAE": mae})
+
+                # ---------- Plot overlay (dt metrics + high-res visuals) ----------
+                ax = axs[row_idx][col_idx]
+                all_preds = np.stack(all_preds)
+                mean_pred = all_preds.mean(axis=0)
+                std_pred  = all_preds.std(axis=0)
+
+                # truth aligned to predictions at dt (washout already applied inside predict)
+                true_dt = z_eval[washout+1 : washout+1 + mean_pred.shape[0]]
+                T_eff   = min(len(true_dt), len(mean_pred))
+                true_dt = true_dt[:T_eff]
+                mean_pred = mean_pred[:T_eff]
+                std_pred  = std_pred[:T_eff]
+
+                # record per-qubit series at dt (used later for diagnostics / magnetization)
+                per_qubit_true[qubit] = true_dt.copy()
+                per_qubit_pred[qubit] = mean_pred.copy()
+
+                # one per-qubit diagnostic block (no duplicates)
+                per_qubit_diag = {
+                    "N": N, "qubit": qubit,
+                    "pred_summary": summarize(mean_pred),
+                    "true_summary": summarize(true_dt),
+                    "pred_bounds": check_bounds(mean_pred),
+                    "acf1_pred": autocorr_lag1(mean_pred),
+                    "acf1_true": autocorr_lag1(true_dt),
+                    "series_error": compare_series(mean_pred, true_dt),
+                }
+                diagnostic_rows.append(per_qubit_diag)
+
+                # time axes — RELATIVE (start at t = (washout+1)*dt)
+                t_dt   = np.arange(len(mean_pred)) * dt
+                t0     = (washout+1 ) * dt
+                start_hi = int(round(t0 / acc_dt))
+                t_fine_rel = np.arange(len(z_test)) * acc_dt - t0
+
+                # draw
+                ax.plot(t_fine_rel[start_hi:], z_test[start_hi:], '-', lw=1.2, color='green', label='True (acc_dt)')
+                ax.plot(t_dt, true_dt, 'o', ms=1, color='darkgreen', alpha=0.8)
+
+                ax.fill_between(t_dt, mean_pred - std_pred, mean_pred + std_pred, alpha=0.2, label="±1σ")
+                ax.plot(t_dt, mean_pred, 'o-', ms=2, label="Mean Prediction")
+
+                # label ensemble members only once to avoid legend spam
+                label_once = True
+                for ipreds in all_preds:
+                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9,
+                            label="ESN members" if label_once else None)
+                    label_once = False
+
+                ax.set_xlim(65, 85)
+                ax.set_title(f"N={N}, Qubit={qubit}")
+                ax.set_xlabel("Time")
+                ax.set_ylabel("⟨σ_z⟩")
+                ax.legend()
+
+                fig_path = os.path.join(model_dir, f"official_overlay_{base_name}.pdf")
+                fig.savefig(fig_path)
+                print(f"Saved overlay plot to {fig_path}")
+
+                # ---------- (OPTIONAL) Global magnetization ----------
+                # Do this once you have ≥2 qubits recorded
+                if len(per_qubit_true) >= 2 and len(per_qubit_pred) >= 2:
+                    T_min_true = min(len(v) for v in per_qubit_true.values())
+                    T_min_pred = min(len(v) for v in per_qubit_pred.values())
+                    T_min = min(T_min_true, T_min_pred)
+
+                    Mz_true = magnetization_from_qubit_series(per_qubit_true, t_len=T_min)
+                    Mz_pred = magnetization_from_qubit_series(per_qubit_pred, t_len=T_min)
+
+                    mag_diag = {
+                        "mag_true_summary": summarize(Mz_true),
+                        "mag_pred_summary": summarize(Mz_pred),
+                        "mag_true_drift": drift_stats(Mz_true),
+                        "mag_pred_drift": drift_stats(Mz_pred),
+                        "mag_series_error": compare_series(Mz_pred, Mz_true)
+                    }
+                    diagnostic_rows.append({"global_magnetization": mag_diag})
+
+
+                
+        # Save diagnostics summary
+        diag_path_json = os.path.join(model_dir, "physics_summary.json")
+        with open(diag_path_json, "w") as f:
+            json.dump(diagnostic_rows, f, indent=2)
+        print(f"Saved physics diagnostics to {diag_path_json}")
+        
+        
+        mae_df = pd.DataFrame(mae_records)
+        mae_df.to_csv(os.path.join(model_dir, "official_run_mae_summary.csv"), index=False)
+        print("Saved MAE summary to official_run_mae_summary.csv")
+
+        with open(os.path.join(model_dir, "official_run_esn_configs.json"), 'w') as f:
+            json.dump(config_records, f, indent=4)
+            print("Saved ESN config log to official_run_esn_configs.json")
 
 
 
