@@ -26,7 +26,6 @@ class Trainer:
         else:
             raise NotImplementedError(f"Learning algorithm '{self.learning_algo}' not implemented.")
 
-
     def debug_covariance(self):
         s = torch.linalg.svdvals(self.xTx)
         tol = s.max() * max(self.xTx.shape) * torch.finfo(s.dtype).eps

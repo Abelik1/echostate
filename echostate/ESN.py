@@ -75,7 +75,7 @@ class ESN(torch.nn.Module):
     def fit(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Teacher-forced training with progressive history:
-        at step t, inputs are [X_t, z_{t-1}, z_{t-2}, ...] and target is Y_t (= z_{t+1})
+        inputs/targets are assumed to be pre-aligned by the dataset (e.g., X[t] -> Y[t] may already represent next-step).
         We collect states after washout and solve a single ridge regression.
         """
         # stack list input
@@ -84,6 +84,7 @@ class ESN(torch.nn.Module):
             targets = torch.stack(targets, dim=0)
 
         B, T, _ = inputs.shape
+        assert T > self.washout, "Need at least washout+1 steps for next-step training."
         X = inputs.to(self.device)    # no extra input scaling here
         Y = targets.to(self.device)
 
@@ -95,27 +96,24 @@ class ESN(torch.nn.Module):
 
         for t in range(T):
             # base input is the current truth at t (teacher forcing)
-            u_base = X[:, t, :]   # shape (B, base_input_dim)
+            u_base = X[:, t, :]  # inputs at time t
 
-            # concat feedback = strictly older truths [z_{t-1}, z_{t-2}, ...]
             if self.feedback > 0:
-                u = torch.cat([u_base, prev_fb], dim=1)  # (B, base + fb*out)
+                u = torch.cat([u_base, prev_fb], dim=1)
             else:
                 u = u_base
 
-            # reservoir update
             x = self.reservoir.update_batch(x, u, self.leak_rate)
 
-            # collect states/targets after washout
             if t >= self.washout:
-                bias_vec = self._ensure_batch_bias(x.shape[0]) # (B,1)
-                xb = torch.cat([x, bias_vec], dim=1)           # (B, res+1)
+                bias_vec = self._ensure_batch_bias(x.shape[0])
+                xb = torch.cat([x, bias_vec], dim=1)
                 state_list.append(xb)
-                target_list.append(Y[:, t, :])                 # aligned with z_{t+1}
+                target_list.append(Y[:, t, :])  # ← next time step
 
-            # update feedback buffer with *current* truth so at (t+1) it holds [z_t, z_{t-1}, ...]
+            # update feedback with the current TRUE OUTPUT at time t
             if self.feedback > 0:
-                prev_fb = torch.cat([prev_fb[:, self.output_dim:], u_base], dim=1)
+                prev_fb = torch.cat([prev_fb[:, self.output_dim:], Y[:, t, :]], dim=1)
 
         # solve readout in one shot
         X_all = torch.cat(state_list,  dim=0)   # (B*(T-washout), res+1)
@@ -134,7 +132,7 @@ class ESN(torch.nn.Module):
         T, _ = inputs.shape
         X = inputs.to(self.device)    # no extra input scaling here
 
-        x = torch.zeros(self.reservoir_size, device=self.device)
+        x = torch.zeros(1, self.reservoir_size, device=self.device)
         preds = []
 
         prev_fb = torch.zeros(self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
@@ -142,9 +140,9 @@ class ESN(torch.nn.Module):
 
         for t in range(T):
             use_closed = closed_loop_after_washout and (t >= self.washout) and (last_y is not None)
+            replace_base = use_closed and (self.base_input_dim == self.output_dim)
 
-            # base input: truth during warm-up; then switch to previous prediction
-            u_base = last_y if use_closed else X[t:t+1, :]      # shape (1, base_input_dim)
+            u_base = last_y if replace_base else X[t:t+1, :]
 
             # concat feedback from *older* items (prev_fb holds up-to-(t-1) history)
             if self.feedback > 0:
@@ -163,8 +161,10 @@ class ESN(torch.nn.Module):
             # feedback buffer now shifts in the *current base input*
             #  - during warm-up this is the truth X[t]
             #  - after washout this is the last prediction last_y
+            
             if self.feedback > 0:
-                prev_fb = torch.cat([prev_fb[self.output_dim:], u_base.squeeze(0)], dim=0)
+                # IMPORTANT: shift in the CURRENT PREDICTION y, not u_base
+                prev_fb = torch.cat([prev_fb[self.output_dim:], y.squeeze(0)], dim=0)
 
             last_y = y
 
@@ -185,8 +185,8 @@ class ESN(torch.nn.Module):
 
         if target_list is not None:
             P = torch.cat(preds, dim=0)
-            T = torch.cat([t[self.washout:] for t in target_list], dim=0)
-            if False:
+            y_true = torch.cat([t[self.washout:] for t in target_list], dim=0)
+            if False: # TODO REMOVE AT SOME POINT
                  # Plot the first plot_limit sequences individually
                 plot_limit =2
                 for idx in range(min(plot_limit, len(preds))):
@@ -204,8 +204,8 @@ class ESN(torch.nn.Module):
                     plt.tight_layout()
                     plt.show()
             return preds, {
-                'mae': mean_absolute_error(P, T).item(),
-                'mse': mean_squared_error(P, T).item()
+                'mae': mean_absolute_error(P, y_true).item(),
+                'mse': mean_squared_error(P, y_true).item()
             }
         return preds
 #region Tune

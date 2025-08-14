@@ -369,3 +369,27 @@ esnStudy_Seed{}_Qbts({}){}_dt{}_dpth{}_wsht{}.pt
 
 Where all 
 dt{round(dt,5)} has some attribute to change .replace('.', '_', 1)
+
+
+## ESN Hyperparameter Guide
+
+This table explains each hyperparameter, what it does, and the typical effects of low vs. high values.
+
+| Hyperparameter | Definition | Low Value Effects | High Value Effects | Key Interactions |
+| --- | --- | --- | --- | --- |
+| **`reservoir_size`** | Number of recurrent neurons in the reservoir (feature dimension of the nonlinear expansion). | Fast training, less overfit risk, but low capacity and poor modeling of complex/long-term dynamics. | Richer dynamics, better at nonlinear tasks, but slower training and higher overfit risk on small datasets. | Larger values often require higher `ridge_param` to avoid overfitting. |
+| **`spectral_radius`** | Scales the largest eigenvalue of the recurrent weight matrix; controls memory length. | Quick state decay, short memory, more reactive to input. | Longer memory; too high (>1.2) may cause instability/chaos. | High values + high `leak_rate` → very slow state decay. |
+| **`feedback`** | Number of past output steps fed back into the reservoir. | No autoregressive context. | Can improve multi-step prediction but risks error accumulation in closed-loop. | Requires `base_input_dim == output_dim` if replacing base input with predictions. |
+| **`input_scaling`** | Scales input-to-reservoir weights (`W_in`); controls input drive strength. | Weak input drive, reservoir dominated by internal dynamics; may fail if signal is small. | Strong input drive, more reactive but less memory; too high can saturate activation function. | Low `input_scaling` + high `spectral_radius` → reservoir acts like long-term memory bank. |
+| **`bias_scaling`** | Range for bias term in reservoir neurons. | Symmetric activations around zero; reduced diversity. | Breaks symmetry and increases diversity; too high may saturate neurons. | Works with `input_scaling` to set operating range of `tanh`. |
+| **`ridge_param`** | Regularization λ in ridge regression for readout weights. | Low: fits noise, unstable if `X` is ill-conditioned. | High: more stable, less overfit, but can underfit and oversmooth. | Larger datasets and reservoirs often need higher λ. |
+| **`leak_rate`** | Proportion of new activation replacing old state each step. | Slow updates, smoother dynamics, long memory; may miss fast changes. | Fast updates, responsive, but short memory unless `spectral_radius` is high. | Low leak + high spectral radius → very slow-changing reservoir. |
+| **`sparsity`** | Fraction of recurrent connections set to zero. | Dense: richer dynamics, but more instability risk at high spectral radius. | Sparse: faster compute, simpler dynamics; too sparse may reduce expressivity. | Very sparse + small reservoir can harm performance. |
+| **`washout`** | Number of timesteps ignored during training to discard unstable transients. | More training data kept but includes unstable states. | Safer training but fewer samples for regression. | Needed washout increases with high `spectral_radius` and low `leak_rate`. |
+| **`learning_algo`** | Solver for ridge regression (`"inv"` or `"cholesky"`). | `"inv"`: fast but less stable for ill-conditioned matrices. | `"cholesky"`: stable and often faster for SPD matrices. | Prefer `"cholesky"` for large datasets or high `reservoir_size`. |
+| **`seed`** | RNG seed for reproducible reservoir initialization. | Random each run; more variety, less reproducibility. | Fixed seed ensures repeatable experiments. | Different seeds can drastically change performance for small reservoirs. |
+
+**Tips:**
+- Larger datasets benefit from slightly higher `ridge_param` and feature standardization before regression.
+- When increasing `reservoir_size`, adjust `ridge_param` to control overfitting.
+- Always verify washout is long enough for your spectral radius and leak rate combination.

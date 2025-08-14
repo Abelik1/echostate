@@ -740,7 +740,7 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [2]
+    N_list         = [5]
     train_seed     = 314
     reservoir_seed  = 314
     pred_seed     = 314
@@ -748,11 +748,11 @@ if __name__ == '__main__':
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 3000 # Number of time series used to train 1 ESN
+    training_depth = 50 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = False  # run Optuna tuning
+    do_tune        = True  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot

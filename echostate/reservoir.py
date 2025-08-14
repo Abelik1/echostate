@@ -32,26 +32,26 @@ class Reservoir:
         self.W = W.to(self.device)
 
     def _initialize_reservoir(self, size, spectral_radius, sparsity):
-        W = torch.randn(size, size)              # CPU
+        W = torch.randn(size, size)
         mask = (torch.rand(size, size) < sparsity)
         W = W * mask
         radius = compute_spectral_radius(W)
+        if radius == 0:     # <-- guard to avoid NaN/Inf scaling
+            radius = 1.0
         W = W * (spectral_radius / radius)
         return W
 
     def update_batch(self, x: torch.Tensor, u: torch.Tensor, leak_rate: float) -> torch.Tensor:
-        # ensure on correct device
-        if x.device != self.device: #TODO REMOVE THESE LATER CHECK, OVERHEAD
+        if x.device != self.device:
             x = x.to(self.device)
         if u.device != self.device:
             u = u.to(self.device)
 
-        single = False
-        if x.dim() == 1:
+        if x.dim() == 1:  # make batch dim
             x = x.unsqueeze(0)
+        if u.dim() == 1:
             u = u.unsqueeze(0)
-            single = True
 
-        pre = u @ self.W_in.T + x @ self.W.T + self._W_bias
+        pre = u @ self.W_in.T + x @ self.W.T + self._W_bias  # (B, R)
         x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
-        return x_new.squeeze(0) if single else x_new
+        return x_new  # ALWAYS (B, reservoir_size)
