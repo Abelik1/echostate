@@ -12,7 +12,7 @@ class Trainer:
         self._I = None
 
     def fit(self, X, Y):
-        X = X = X.to(self.device)
+        X = X.to(self.device)
         Y = Y.to(self.device)
         I = torch.eye(X.shape[1], device=self.device)
         self.xTx = X.T @ X
