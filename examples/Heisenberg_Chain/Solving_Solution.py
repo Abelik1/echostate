@@ -297,14 +297,14 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [20,200],
-            spectral_radius_limit=[0.2,0.9],
+            reservoir_limit= [700,700],
+            spectral_radius_limit=[0.6,0.9],
             feedback_limit=0,
-            input_scaling_limit=[ 0.01, 0.05],
-            ridge_param_limit=[0.0023,0.0023],
-            leak_rate_limit=[0.2, 0.8],
-            sparsity_limit= [0.05,0.4],
-            bias_scaling_limit=[ 0.0, 0.0],
+            input_scaling_limit=[0.01, 0.09],
+            ridge_param_limit=[0.09554568632154972, 0.09554568632154972],
+            leak_rate_limit=[0.4,0.7],
+            sparsity_limit= [0.07,0.07],
+            bias_scaling_limit= 0.0,
             device=predictor.device,
             learning_algo="inv"
         )
@@ -740,7 +740,7 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [5]
+    N_list         = [4]
     train_seed     = 314
     reservoir_seed  = 314
     pred_seed     = 314
@@ -748,7 +748,7 @@ if __name__ == '__main__':
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 50 # Number of time series used to train 1 ESN
+    training_depth = 1000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
