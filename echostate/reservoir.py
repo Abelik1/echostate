@@ -1,5 +1,9 @@
+# echostate/reservoir.py
+import logging
 import torch
 from .utils import compute_spectral_radius
+
+LOGGER = logging.getLogger(__name__)
 
 class Reservoir:
     def __init__(
@@ -31,14 +35,37 @@ class Reservoir:
         W = self._initialize_reservoir(reservoir_size, spectral_radius, sparsity)
         self.W = W.to(self.device)
 
+        LOGGER.debug(
+            "Reservoir init",
+            extra={"extra": {
+                "reservoir_size": reservoir_size,
+                "input_dim": input_dim,
+                "sparsity": sparsity,
+                "spectral_radius_target": spectral_radius,
+                "W_in_shape": tuple(self.W_in.shape),
+                "W_bias_shape": tuple(self.W_bias.shape),
+            }},
+        )
+
     def _initialize_reservoir(self, size, spectral_radius, sparsity):
         W = torch.randn(size, size)
         mask = (torch.rand(size, size) < sparsity)
         W = W * mask
-        radius = compute_spectral_radius(W)
-        if radius == 0:     # <-- guard to avoid NaN/Inf scaling
-            radius = 1.0
-        W = W * (spectral_radius / radius)
+        radius_before = compute_spectral_radius(W)
+        if radius_before == 0:
+            radius_before = 1.0
+        W = W * (spectral_radius / radius_before)
+        radius_after = compute_spectral_radius(W)
+        LOGGER.info(
+            "Reservoir spectral radius scaled",
+            extra={"extra": {
+                "size": size,
+                "sparsity": float(sparsity),
+                "radius_before": float(radius_before),
+                "radius_after": float(radius_after),
+                "target": float(spectral_radius),
+            }},
+        )
         return W
 
     def update_batch(self, x: torch.Tensor, u: torch.Tensor, leak_rate: float) -> torch.Tensor:
@@ -54,4 +81,21 @@ class Reservoir:
 
         pre = u @ self.W_in.T + x @ self.W.T + self._W_bias  # (B, R)
         x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
-        return x_new  # ALWAYS (B, reservoir_size)
+
+        # Ultra-verbose per-step logging (guarded by TRACE)
+        if LOGGER.isEnabledFor(5):  # TRACE
+            try:
+                from .logging_utils import tensor_stats
+                LOGGER.trace("Reservoir step",
+                    extra={"extra": {
+                        "u_stats": tensor_stats(u),
+                        "x_stats": tensor_stats(x),
+                        "pre_stats": tensor_stats(pre),
+                        "x_new_stats": tensor_stats(x_new),
+                        "leak_rate": float(leak_rate),
+                    }},
+                )
+            except Exception:
+                pass
+
+        return x_new  # (B, reservoir_size)

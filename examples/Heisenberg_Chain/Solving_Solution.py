@@ -744,7 +744,7 @@ if __name__ == '__main__':
     train_seed     = 314
     reservoir_seed  = 314
     pred_seed     = 314
-    qubit_list     = [0]       # list of qubit indices
+    qubit_list     = [0,1,2]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
@@ -752,7 +752,7 @@ if __name__ == '__main__':
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = True  # run Optuna tuning
+    do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot
@@ -763,6 +763,36 @@ if __name__ == '__main__':
     # optuna params (only used if do_tune)
     n_trials   = 2000
     num_pred      = 40 
+
+
+    #Logging Settings
+    import logging, os
+    from echostate.logging_config import setup_logging
+
+    # a stable, readable run_name (so each run has its own log files)
+    fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
+    run_name = (
+        f"official"
+        f"_N{','.join(map(str, N_list))}"
+        f"_Q{','.join(map(str, qubit_list))}"
+        f"_dt{fmt_dt_val}"
+        f"_depth{training_depth}"
+        f"_seed{train_seed}"
+    )
+
+    # choose how chatty file logs are per mode
+    file_level = "TRACE" if official_run else ("DEBUG" if (do_tune or do_predictions) else "INFO")
+    """INFO	20	High-level progress and summaries	🟢 default readable
+    DEBUG	10	Detailed diagnostics, shapes, parameters, but not every step	🔵 pretty chatty
+    TRACE*	5	Extremely detailed — per-step, per-matrix stats, low-level math — usually huge logs	🔴 maximum chatter"""
+    paths = setup_logging(
+        log_dir="./logs",          # where .log and .jsonl go
+        run_name=run_name,         # used in filenames
+        console_level="INFO",      # tidy console
+        file_level=file_level,     # full detail to files
+        jsonl_file=True,           # machine-readable
+        plain_file=True,           # human-readable
+    )
 
     # ─── Preload high-res reference & (for single/official) test history ───
     from qutip import Qobj, sigmaz, expect
@@ -1026,7 +1056,10 @@ if __name__ == '__main__':
 
 #region official run
     elif official_run:
-
+        # logging.getLogger("echostate.reservoir").setLevel(5)      # TRACE for per-step reservoir stats
+        # logging.getLogger("echostate.ESN").setLevel(logging.DEBUG)
+        # logging.getLogger("echostate.trainer").setLevel(logging.DEBUG)
+        logger.info("Starting official run")
         model_dir = "./examples/Heisenberg_Chain/cache/"
         param_dir = "./examples/Heisenberg_Chain/trained_esns/"
         os.makedirs(model_dir, exist_ok=True)
@@ -1041,7 +1074,7 @@ if __name__ == '__main__':
             per_qubit_true = {}
             per_qubit_pred = {}
             for col_idx, qubit in enumerate(qubit_list):
-                print(f"\nSolving N={N}, qubit={qubit}")
+                logger.info("Solving", extra={"extra": {"N": N, "qubit": qubit}})
 
                 steps = int(T / dt)
                 fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
@@ -1054,15 +1087,21 @@ if __name__ == '__main__':
                 best_param_file = os.path.join(param_dir, f"bestparams_{param_name}.json")
 
                 # Load best hyperparameters
+                logger.info("Param name", extra={"extra": {"param_name": param_name}})
                 try:
                     with open(best_param_file, 'r') as f:
                         all_best = json.load(f)
                     best = all_best.get(str(round(dt, 5)), {})
-                    # best = all_best.get(str(round(0.2, 5)), {})
-                    print("Loaded best parameters:" if best else "No best parameters found for current dt.")
+                    if best:
+                        logger.info("Loaded best parameters", extra={"extra": {"file": best_param_file}})
+                    else:
+                        logger.warning("No best parameters for current dt", extra={"extra": {"file": best_param_file}})
                 except (FileNotFoundError, json.JSONDecodeError):
                     best = {}
                     print("No best parameter file found. Using defaults.")
+                    logger.warning("Best parameter file not found or invalid. Using defaults.",
+                               extra={"extra": {"file": best_param_file}})
+
 
                 # Predictor only for data orchestration
                 predictor = ESNPredictor(
@@ -1142,12 +1181,14 @@ if __name__ == '__main__':
 
                     if os.path.exists(model_path):
                         print(f"Loading existing ESN Ex{i} (seed={rseed})")
+                        logger.info("Loading existing ESN", extra={"extra": {"ex": i, "seed": rseed, "model_path": model_path}})
                         esn = torch.load(model_path, weights_only=False)
                         esn.to(device).eval()
                     else:
-                        print(f"Training ESN Ex{i} (seed={rseed})")
+                        logger.info("Training ESN", extra={"extra": {"ex": i, "seed": rseed}})
                         predictor.train_esn(esn)
                         torch.save(esn, model_path)
+                        logger.info("Saved trained ESN", extra={"extra": {"model_path": model_path}})
 
                     # Log the params you ACTUALLY used (not the old defaults)
                     config_records.append({
@@ -1225,7 +1266,7 @@ if __name__ == '__main__':
 
                 fig_path = os.path.join(model_dir, f"official_overlay_{base_name}.pdf")
                 fig.savefig(fig_path)
-                print(f"Saved overlay plot to {fig_path}")
+                logger.info("Saved overlay plot", extra={"extra": {"fig_path": fig_path}})
 
                 # ---------- (OPTIONAL) Global magnetization ----------
                 # Do this once you have ≥2 qubits recorded
@@ -1262,6 +1303,9 @@ if __name__ == '__main__':
         with open(os.path.join(model_dir, "official_run_esn_configs.json"), 'w') as f:
             json.dump(config_records, f, indent=4)
             print("Saved ESN config log to official_run_esn_configs.json")
+        logger.info("Saved physics diagnostics", extra={"extra": {"path": diag_path_json}})
+        logger.info("Saved MAE summary CSV", extra={"extra": {"path": os.path.join(model_dir, 'official_run_mae_summary.csv')}})
+        logger.info("Saved ESN config log", extra={"extra": {"path": os.path.join(model_dir, 'official_run_esn_configs.json')}})
 
 
 
