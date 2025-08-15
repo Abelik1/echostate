@@ -153,6 +153,7 @@ class ESNPredictor:
             batch_size=self.batch_size,
             learning_algo=self.learning_algo,
             seed=(self.reservoir_seed if seed is None else seed),
+            step_log_every=ESN_STEP_LOG_EVERY,
         ).to(self.device)
         return esn
 
@@ -748,11 +749,11 @@ if __name__ == '__main__':
     train_seed     = 3141
     reservoir_seed  = 3141
     pred_seed     = 3141
-    qubit_list     = [0,1,2]       # list of qubit indices
+    qubit_list     = [0]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 5000 # Number of time series used to train 1 ESN
+    training_depth = 1000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
@@ -774,7 +775,13 @@ if __name__ == '__main__':
     import logging, os
     from echostate.logging_config import setup_logging
 
-    # a stable, readable run_name (so each run has its own log files)
+    VERBOSITY = "DEBUG"           # one of: "INFO", "DEBUG"  (avoid TRACE unless deep dive)
+    STEP_LOG_EVERY = 50           # log ESN step stats every N steps
+    SILENCE_3P = True             # silence matplotlib/PIL/optuna/etc. at WARNING
+
+    import logging
+    from echostate.logging_config import setup_logging
+
     fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
     run_name = (
         f"official"
@@ -785,20 +792,30 @@ if __name__ == '__main__':
         f"_seed{train_seed}"
     )
 
-    # choose how chatty file logs are per mode
-    file_level = "TRACE" if official_run else ("DEBUG" if (do_tune or do_predictions) else "INFO")
-    """INFO	20	High-level progress and summaries	🟢 default readable
-    DEBUG	10	Detailed diagnostics, shapes, parameters, but not every step	🔵 pretty chatty
-    TRACE*	5	Extremely detailed — per-step, per-matrix stats, low-level math — usually huge logs	🔴 maximum chatter"""
     paths = setup_logging(
-        log_dir="./logs",          # where .log and .jsonl go
-        run_name=run_name,         # used in filenames
-        console_level="INFO",      # tidy console
-        file_level=file_level,     # full detail to files
-        jsonl_file=True,           # machine-readable
-        plain_file=True,           # human-readable
+        log_dir="./logs",
+        run_name=run_name,
+        console_level="INFO",      # console stays readable
+        file_level=VERBOSITY,      # file detail = DEBUG (good default)
+        jsonl_file=True,
+        plain_file=True,
     )
 
+    # 1) Silence noisy third‑party loggers
+    if SILENCE_3P:
+        for name in (
+            "matplotlib", "PIL", "PIL.Image", "PIL.PngImagePlugin",
+            "numba", "qutip", "optuna", "asyncio", "urllib3", "parso",
+        ):
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+    # 2) Make reservoir quiet; keep ESN/trainer informative
+    logging.getLogger("echostate.reservoir").setLevel(logging.WARNING)   # hide “Reservoir step”
+    logging.getLogger("echostate.ESN").setLevel(logging.DEBUG)           # shapes, diagnostics, sampled steps
+    logging.getLogger("echostate.trainer").setLevel(logging.DEBUG)       # covariance stats, solves
+
+    # 3) Pass step sampling down to ESN (see small ESN change below)
+    ESN_STEP_LOG_EVERY = STEP_LOG_EVERY
     # ─── Preload high-res reference & (for single/official) test history ───
     from qutip import Qobj, sigmaz, expect
     np.random.seed(train_seed)
@@ -1062,9 +1079,7 @@ if __name__ == '__main__':
 
 #region official run
     elif official_run:
-        # logging.getLogger("echostate.reservoir").setLevel(5)      # TRACE for per-step reservoir stats
-        # logging.getLogger("echostate.ESN").setLevel(logging.DEBUG)
-        # logging.getLogger("echostate.trainer").setLevel(logging.DEBUG)
+        logger = logging.getLogger("official_run")
         logger.info("Starting official run")
         model_dir = "./examples/Heisenberg_Chain/cache/"
         param_dir = "./examples/Heisenberg_Chain/trained_esns/"
@@ -1093,7 +1108,7 @@ if __name__ == '__main__':
                 best_param_file = os.path.join(param_dir, f"bestparams_{param_name}.json")
 
                 # Load best hyperparameters
-                logger.info("Param name", extra={"extra": {"param_name": param_name}})
+                logger.info(f"Param name: {param_name}")
                 try:
                     with open(best_param_file, 'r') as f:
                         all_best = json.load(f)

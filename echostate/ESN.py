@@ -30,6 +30,7 @@ class ESN(torch.nn.Module):
         washout: int = 50,
         batch_size: int = None,
         seed: int = None,
+        step_log_every: int | None = None,
     ):
         super().__init__()
         # device + optional seeding
@@ -49,7 +50,7 @@ class ESN(torch.nn.Module):
         self.washout = washout
         self.batch_size = batch_size
         self.learning_algo = learning_algo
-
+        self.step_log_every = step_log_every
         # components
         self.reservoir = Reservoir(
             input_dim=self.input_dim,
@@ -136,15 +137,17 @@ class ESN(torch.nn.Module):
             if self.feedback > 0:
                 prev_fb = torch.cat([prev_fb[:, self.output_dim:], Y[:, t, :]], dim=1)
 
-            # Optional very detailed per-step logging
-            if LOGGER.isEnabledFor(5):  # TRACE
-                LOGGER.trace("fit.step",
-                    extra={"extra": {
-                        "t": t,
-                        "post_washout": t >= self.washout,
-                        "x_stats": tensor_stats(x),
-                    }},
-                )
+            if LOGGER.isEnabledFor(logging.DEBUG):  # or 5 if you keep TRACE
+                if self.step_log_every and (t % self.step_log_every != 0):
+                    pass  # skip most steps
+                else:
+                    LOGGER.debug("fit.step",
+                        extra={"extra": {
+                            "t": t,
+                            "post_washout": t >= self.washout,
+                            "x_stats": tensor_stats(x),
+                        }},
+                    )
 
         # solve readout in one shot
         X_all = torch.cat(state_list,  dim=0)   # (B*(T-washout), res+1)
@@ -213,11 +216,13 @@ class ESN(torch.nn.Module):
 
             last_y = y
 
-            # Optional detailed per-step logging
-            if LOGGER.isEnabledFor(5):  # TRACE
-                LOGGER.trace("forward.step",
-                    extra={"extra": {"t": t, "use_closed": use_closed, "y_stats": tensor_stats(y)}}
-                )
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                if self.step_log_every and (t % self.step_log_every != 0):
+                    pass
+                else:
+                    LOGGER.debug("forward.step",
+                        extra={"extra": {"t": t, "use_closed": use_closed, "y_stats": tensor_stats(y)}}
+                    )
 
         out = torch.stack(preds, dim=0)
         return out[self.washout:]
@@ -314,7 +319,7 @@ class ESN(torch.nn.Module):
                 ridge_param=ridge_param,
                 learning_algo=learning_algo,
                 batch_size=len(input_list),
-                seed=seed
+                seed=seed,
             ).to(device)
 
             model.fit(X_tensor, Y_tensor)

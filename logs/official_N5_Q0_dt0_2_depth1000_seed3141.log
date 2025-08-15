@@ -1,0 +1,41 @@
+2025-08-15 14:14:22 | INFO  | official_run | Starting official run
+2025-08-15 14:14:22 | INFO  | official_run | Solving
+2025-08-15 14:14:22 | INFO  | official_run | Param name: cholesky_Seed3141_Qbts(1)5_dt0_2_dpth50_wsht75
+2025-08-15 14:14:22 | INFO  | official_run | Loaded best parameters
+2025-08-15 14:14:23 | INFO  | echostate.ESN | ESN init
+2025-08-15 14:14:23 | INFO  | official_run | Training ESN
+2025-08-15 14:14:23 | INFO  | echostate.ESN | ESN.fit start
+2025-08-15 14:14:23 | DEBUG | echostate.ESN | inputs(batch) => {'shape': (1000, 500, 1), 'dtype': 'float32', 'device': 'cpu', 'digest': 'd04bbe4542f7abbf', 'finite_frac': 1.0, 'mean': -0.0033459009137004614, 'std': 0.17159070074558258, 'min': -0.6475635766983032, 'max': 0.6815749406814575, 'quantiles': {'0.0': -0.6475635766983032, '0.009999999776482582': -0.3915427029132843, '0.5': -0.0034432385582476854, '0.9900000095367432': 0.3908090591430664, '1.0': 0.6815749406814575}, 'zero_frac': 0.0, 'sat_frac_|x|>0.99': 0.0}
+2025-08-15 14:14:23 | DEBUG | echostate.ESN | targets(batch) => {'shape': (1000, 500, 1), 'dtype': 'float32', 'device': 'cpu', 'digest': '3e501da102aedbf5', 'finite_frac': 1.0, 'mean': -0.003332488937303424, 'std': 0.17157545685768127, 'min': -0.6475635766983032, 'max': 0.6815749406814575, 'quantiles': {'0.0': -0.6475635766983032, '0.009999999776482582': -0.3914596140384674, '0.5': -0.0034308317117393017, '0.9900000095367432': 0.39060407876968384, '1.0': 0.6815749406814575}, 'zero_frac': 0.0, 'sat_frac_|x|>0.99': 0.0}
+2025-08-15 14:14:23 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:24 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:25 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:26 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:26 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:27 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:28 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:28 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:29 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:30 | DEBUG | echostate.ESN | fit.step
+2025-08-15 14:14:33 | DEBUG | echostate.ESN | Design matrix diagnostics
+2025-08-15 14:17:07 | DEBUG | echostate.ESN | X_all => {'shape': (425000, 1001), 'dtype': 'float32', 'device': 'cpu', 'digest': 'bbeb865a6cb7f241', 'finite_frac': 0.9999998211860657, 'mean': -1.1417222367526847e-06, 'std': 0.004452510271221399, 'min': -0.039890240877866745, 'max': 0.038542747497558594, 'error': 'failed_stats:quantile() input tensor is too large'}
+2025-08-15 14:17:07 | DEBUG | echostate.ESN | Y_all => {'shape': (425000, 1), 'dtype': 'float32', 'device': 'cpu', 'digest': '698f56731787b122', 'finite_frac': 1.0, 'mean': -0.003338586539030075, 'std': 0.17153556644916534, 'min': -0.6475635766983032, 'max': 0.6815749406814575, 'quantiles': {'0.0': -0.6475635766983032, '0.009999999776482582': -0.3914453387260437, '0.5': -0.003433703910559416, '0.9900000095367432': 0.3905860483646393, '1.0': 0.6815749406814575}, 'zero_frac': 0.0, 'sat_frac_|x|>0.99': 0.0}
+2025-08-15 14:17:12 | DEBUG | echostate.trainer | Trainer.fit: formed X^T X and X^T Y
+2025-08-15 14:17:12 | DEBUG | echostate.trainer | Readout weights computed
+2025-08-15 14:17:12 | INFO  | echostate.ESN | Trainer covariance stats
+2025-08-15 14:17:13 | INFO  | official_run | Saved trained ESN
+2025-08-15 14:17:13 | INFO  | echostate.ESN | ESN.forward start
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:13 | DEBUG | echostate.ESN | forward.step
+2025-08-15 14:17:14 | INFO  | official_run | Saved overlay plot
+2025-08-15 14:17:14 | INFO  | official_run | Saved physics diagnostics
+2025-08-15 14:17:14 | INFO  | official_run | Saved MAE summary CSV
+2025-08-15 14:17:14 | INFO  | official_run | Saved ESN config log

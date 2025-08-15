@@ -10,7 +10,7 @@ from typing import Any, Dict
 # -------- TRACE level (below DEBUG) --------
 TRACE_LEVEL_NUM = 5
 logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")
-
+logging.TRACE = TRACE_LEVEL_NUM
 def trace(self, message, *args, **kwargs):
     if self.isEnabledFor(TRACE_LEVEL_NUM):
         self._log(TRACE_LEVEL_NUM, message, args, **kwargs)
