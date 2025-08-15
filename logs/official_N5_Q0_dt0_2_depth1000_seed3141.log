@@ -39,3 +39,17 @@
 2025-08-15 14:17:14 | INFO  | official_run | Saved physics diagnostics
 2025-08-15 14:17:14 | INFO  | official_run | Saved MAE summary CSV
 2025-08-15 14:17:14 | INFO  | official_run | Saved ESN config log
+2025-08-15 15:17:12 | INFO  | official_run | Starting official run
+2025-08-15 15:17:12 | INFO  | official_run | Solving
+2025-08-15 15:17:12 | INFO  | official_run | Param name: cholesky_Seed3141_Qbts(1)5_dt0_2_dpth50_wsht75
+2025-08-15 15:17:12 | INFO  | official_run | Loaded best parameters
+2025-08-15 15:17:13 | INFO  | echostate.ESN | ESN init
+2025-08-15 15:17:13 | INFO  | official_run | Training ESN
+2025-08-15 15:17:13 | INFO  | echostate.ESN | ESN.fit start
+2025-08-15 15:20:18 | INFO  | echostate.ESN | Trainer covariance stats
+2025-08-15 15:20:19 | INFO  | official_run | Saved trained ESN
+2025-08-15 15:20:19 | INFO  | echostate.ESN | ESN.forward start
+2025-08-15 15:20:20 | INFO  | official_run | Saved overlay plot
+2025-08-15 15:20:20 | INFO  | official_run | Saved physics diagnostics
+2025-08-15 15:20:20 | INFO  | official_run | Saved MAE summary CSV
+2025-08-15 15:20:20 | INFO  | official_run | Saved ESN config log

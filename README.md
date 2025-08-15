@@ -393,3 +393,31 @@ This table explains each hyperparameter, what it does, and the typical effects o
 - Larger datasets benefit from slightly higher `ridge_param` and feature standardization before regression.
 - When increasing `reservoir_size`, adjust `ridge_param` to control overfitting.
 - Always verify washout is long enough for your spectral radius and leak rate combination.
+
+
+
+When to use which (quick guide)
+
+cholesky / solve: Fastest for well‑conditioned SPD systems (yours usually is with λ>0).
+
+eigh: Very stable and transparent; easy to clamp tiny eigenvalues if conditioning is poor.
+
+cg: Scales to large reservoirs when forming factorizations is expensive; stop early for a bias–variance trade‑off (useful in noisy physics data).
+
+svd: Gold standard for numerical stability; handles rank deficiency gracefully; best if you can keep X around.
+
+tsvd: Adds explicit low‑rank regularization; great when your design has lots of near‑collinear features (common with long washouts).
+
+qr: Solid for least squares; with diagonal loading it behaves like a fast approximate ridge.
+
+pinv: Simple and robust; with the Tikhonov augmentation it reproduces ridge via a single pinv.
+
+Implementation notes
+
+If you want qr/svd/pinv, keep self.X and self.Y (post‑washout, with the bias column) alongside xTx/xTy.
+
+For cg, set sensible defaults (e.g., rtol=1e-6, maxiter=1000–5000) and log residual norms so your physics runs are auditable.
+
+For extra safety, add a small jitter to A before factorizations: A = A + 1e-12 * I (scale by A.norm() if needed).
+
+If you compute multiple outputs, all solvers above handle multiple RHS (xTy has shape (R+1, d_out)), so they’re vectorized.

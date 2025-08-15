@@ -39,3 +39,17 @@
 {"ts": "2025-08-15T13:17:14.512Z", "level": "INFO", "name": "official_run", "msg": "Saved physics diagnostics", "path": "./examples/Heisenberg_Chain/cache/physics_summary.json"}
 {"ts": "2025-08-15T13:17:14.516Z", "level": "INFO", "name": "official_run", "msg": "Saved MAE summary CSV", "path": "./examples/Heisenberg_Chain/cache/official_run_mae_summary.csv"}
 {"ts": "2025-08-15T13:17:14.516Z", "level": "INFO", "name": "official_run", "msg": "Saved ESN config log", "path": "./examples/Heisenberg_Chain/cache/official_run_esn_configs.json"}
+{"ts": "2025-08-15T14:17:12.085Z", "level": "INFO", "name": "official_run", "msg": "Starting official run"}
+{"ts": "2025-08-15T14:17:12.712Z", "level": "INFO", "name": "official_run", "msg": "Solving", "N": 5, "qubit": 0}
+{"ts": "2025-08-15T14:17:12.714Z", "level": "INFO", "name": "official_run", "msg": "Param name: cholesky_Seed3141_Qbts(1)5_dt0_2_dpth50_wsht75"}
+{"ts": "2025-08-15T14:17:12.723Z", "level": "INFO", "name": "official_run", "msg": "Loaded best parameters", "file": "./examples/Heisenberg_Chain/trained_esns/bestparams_cholesky_Seed3141_Qbts(1)5_dt0_2_dpth50_wsht75.json"}
+{"ts": "2025-08-15T14:17:13.569Z", "level": "INFO", "name": "echostate.ESN", "msg": "ESN init", "device": "cpu", "base_input_dim": 1, "output_dim": 1, "input_dim": 1, "reservoir_size": 1000, "feedback": 0, "leak_rate": 0.6395281993939946, "washout": 75, "learning_algo": "cholesky"}
+{"ts": "2025-08-15T14:17:13.584Z", "level": "INFO", "name": "official_run", "msg": "Training ESN", "ex": 0, "seed": 3141}
+{"ts": "2025-08-15T14:17:13.630Z", "level": "INFO", "name": "echostate.ESN", "msg": "ESN.fit start", "B": 1000, "T": 500, "Din": 1, "washout": 75}
+{"ts": "2025-08-15T14:20:18.790Z", "level": "INFO", "name": "echostate.ESN", "msg": "Trainer covariance stats", "cov_stats": {"shape": [1001, 1001], "rank": 14, "cond": Infinity, "sigma_max": 4751.82666015625, "sigma_min": 0.0}}
+{"ts": "2025-08-15T14:20:19.251Z", "level": "INFO", "name": "official_run", "msg": "Saved trained ESN", "model_path": "./examples/Heisenberg_Chain/cache/trainedmodel_Seed3141_rSeed3141_batchSize1000_Qbts(1)5_dt0_2.pt"}
+{"ts": "2025-08-15T14:20:19.251Z", "level": "INFO", "name": "echostate.ESN", "msg": "ESN.forward start", "T": 500, "Din": 1, "washout": 75}
+{"ts": "2025-08-15T14:20:20.915Z", "level": "INFO", "name": "official_run", "msg": "Saved overlay plot", "fig_path": "./examples/Heisenberg_Chain/cache/official_overlay_batchSize1000_Qbts(1)5_dt0_2.pdf"}
+{"ts": "2025-08-15T14:20:20.970Z", "level": "INFO", "name": "official_run", "msg": "Saved physics diagnostics", "path": "./examples/Heisenberg_Chain/cache/physics_summary.json"}
+{"ts": "2025-08-15T14:20:20.970Z", "level": "INFO", "name": "official_run", "msg": "Saved MAE summary CSV", "path": "./examples/Heisenberg_Chain/cache/official_run_mae_summary.csv"}
+{"ts": "2025-08-15T14:20:20.970Z", "level": "INFO", "name": "official_run", "msg": "Saved ESN config log", "path": "./examples/Heisenberg_Chain/cache/official_run_esn_configs.json"}

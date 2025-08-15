@@ -753,7 +753,7 @@ if __name__ == '__main__':
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 1000 # Number of time series used to train 1 ESN
+    training_depth = 50 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
@@ -762,7 +762,7 @@ if __name__ == '__main__':
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot
     
-    learning_algo = "cholesky"
+    learning_algo = "solve" #cholesky / solve / eigh / cg/ svd / tsvd / qr / pinv
     
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
@@ -775,7 +775,7 @@ if __name__ == '__main__':
     import logging, os
     from echostate.logging_config import setup_logging
 
-    VERBOSITY = "DEBUG"           # one of: "INFO", "DEBUG"  (avoid TRACE unless deep dive)
+    VERBOSITY = "INFO"           # one of: "INFO", "DEBUG"  (avoid TRACE unless deep dive)
     STEP_LOG_EVERY = 50           # log ESN step stats every N steps
     SILENCE_3P = True             # silence matplotlib/PIL/optuna/etc. at WARNING
 
@@ -1136,7 +1136,7 @@ if __name__ == '__main__':
                     training_depth=training_depth,
                     history_seed=train_seed,
                     reservoir_seed=reservoir_seed,
-                    learning_algo = "cholesky",
+                    learning_algo = learning_algo,
                     device=device
                 )
 
@@ -1173,7 +1173,7 @@ if __name__ == '__main__':
                 diagnostic_rows.append({"simulator_checks": sim_diag})
                 seeds = [reservoir_seed + i for i in range(testing_depth)]
                 all_preds = []
-                base_name = f"batchSize{training_depth}_{qubit_tag}_dt{fmt_dt_val}"
+                base_name = f"{learning_algo}_batchSize{training_depth}_{qubit_tag}_dt{fmt_dt_val}"
 
                 # Build the dt stream used for ESN evaluation ONCE
                 if not np.isclose(dt, acc_dt):
@@ -1190,12 +1190,12 @@ if __name__ == '__main__':
 
                     # fresh ESN for each seed (lazily constructed)
                     esn = predictor.make_esn(
-                        reservoir_size=best.get("reservoir_size", 150),
-                        spectral_radius=best.get("spectral_radius", 1.6),
+                        reservoir_size=best.get("reservoir_size", 1000),
+                        spectral_radius=best.get("spectral_radius", 0.99),
                         input_scaling=best.get("input_scaling", 1.01),
-                        ridge_param=best.get("ridge_param", 1e-7),
-                        leak_rate=best.get("leak_rate", 0.9),
-                        sparsity=best.get("sparsity", 0.1),
+                        ridge_param=best.get("ridge_param", 0.00857),
+                        leak_rate=best.get("leak_rate", 0.64),
+                        sparsity=best.get("sparsity", 0.17),
                         feedback=best.get("feedback", 0),
                         bias_scaling=best.get("bias_scaling", 0.0),
                         seed=rseed

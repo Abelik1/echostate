@@ -20,7 +20,8 @@ class Trainer:
         I = torch.eye(X.shape[1], device=self.device)
         self.xTx = X.T @ X
         self.xTy = X.T @ Y
-
+        self.X = X
+        self.Y = Y
         LOGGER.debug("Trainer.fit: formed X^T X and X^T Y",
             extra={"extra": {
                 "X_shape": tuple(X.shape),
@@ -31,6 +32,7 @@ class Trainer:
         )
 
         try:
+            
             if self.learning_algo == "inv":
                 W = (torch.linalg.inv(self.xTx + self.ridge_param * I) @ self.xTy).T
             elif self.learning_algo == "cholesky":
