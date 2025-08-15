@@ -49,7 +49,9 @@ class ESNPredictor:
                  history_seed: int = None,
                  reservoir_seed: int = None,
                  cache_dir: str = "./examples/Heisenberg_Chain/cache/",
+                 learning_algo = "inv",
                  device: torch.device = torch.device('cpu')):
+                 
         # Core settings
         self.steps = steps
         self.dt = dt
@@ -59,6 +61,7 @@ class ESNPredictor:
         self.batch_size = batch_size
         self.training_depth = training_depth
         self.device = device
+        self.learning_algo = learning_algo
 
         # Seeds
         self.history_seed   = history_seed if history_seed is not None else reservoir_seed
@@ -148,6 +151,7 @@ class ESNPredictor:
             bias_scaling=bias_scaling,
             washout=self.washout,
             batch_size=self.batch_size,
+            learning_algo=self.learning_algo,
             seed=(self.reservoir_seed if seed is None else seed),
         ).to(self.device)
         return esn
@@ -157,6 +161,7 @@ class ESNPredictor:
         inputs, targets = self.build_dataset()
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
         esn.fit(inputs, targets)
+        
 
     def predict_sequence(self, esn, z_test):
         """
@@ -277,7 +282,7 @@ def plot_hyperparams_vs_N(perm_dir):
     fig.suptitle("ESN Hyperparameters vs System Size (N)", fontsize=14)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     
-def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param_name, dt=None, plots=False):
+def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param_name, dt=None, plots=False, learning_algo="inv"):
     import optuna
     from optuna.visualization import (
         plot_optimization_history, plot_param_importances,
@@ -290,23 +295,22 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
 
     best_params_dict = {}
     input_list, target_list = predictor.build_dataset()
-
     try:
         study = ESN.tune(
             input_list, target_list,
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [700,700],
-            spectral_radius_limit=[0.6,0.9],
+            reservoir_limit= [500,500],
+            spectral_radius_limit=[1.0,1.5],
             feedback_limit=0,
-            input_scaling_limit=[0.01, 0.09],
-            ridge_param_limit=[0.09554568632154972, 0.09554568632154972],
-            leak_rate_limit=[0.4,0.7],
-            sparsity_limit= [0.07,0.07],
+            input_scaling_limit=[0.1, 0.3],
+            ridge_param_limit=[1e-1, 1.0],
+            leak_rate_limit=[ 0.2, 0.5],
+            sparsity_limit= [0.1,0.2],
             bias_scaling_limit= 0.0,
             device=predictor.device,
-            learning_algo="inv"
+            learning_algo= learning_algo
         )
     except KeyboardInterrupt:
         print("Interrupted! Loading best trial so far...")
@@ -740,15 +744,15 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [4]
-    train_seed     = 314
-    reservoir_seed  = 314
-    pred_seed     = 314
+    N_list         = [5]
+    train_seed     = 3141
+    reservoir_seed  = 3141
+    pred_seed     = 3141
     qubit_list     = [0,1,2]       # list of qubit indices
     washout        = 75
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 1000 # Number of time series used to train 1 ESN
+    training_depth = 5000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
@@ -757,6 +761,7 @@ if __name__ == '__main__':
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot
     
+    learning_algo = "cholesky"
     
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
@@ -832,8 +837,8 @@ if __name__ == '__main__':
             fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
             qubit_tag = f"Qbts({(0 if ignore_qubit else qubit_list[0]) + 1}){N}"
             extra_wash = 75 if ignore_washout else washout
-            param_name = f"Seed3141_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
-            study_name = f"esnStudy_Seed{train_seed}_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht75"
+            param_name = f"{learning_algo}_Seed3141_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
+            study_name = f"esnStudy_{learning_algo}_Seed{train_seed}_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht75"
             print(study_name)
             study_dir  = "./examples/Heisenberg_Chain/trained_esns/"
             print(param_name)
@@ -847,7 +852,8 @@ if __name__ == '__main__':
                 n_trials=n_trials,
                 param_name=param_name,
                 dt=dt,
-                plots=False
+                plots=False,
+                learning_algo=learning_algo,
             )
             
 #region Predictions
@@ -1081,7 +1087,7 @@ if __name__ == '__main__':
                 qubit_tag = f"Qbts({(0 if ignore_qubit else qubit) + 1}){N}"
                 # qubit_tag = f"Qbts({1}){N}"
                 extra_wash = 75 if ignore_washout else washout
-                param_name = f"Seed3141_Qbts({1}){N}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
+                param_name = f"{learning_algo}_Seed3141_Qbts({1}){N}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
                 # param_name = "Seed3141_Qbts(1)2_dt0_2_dpth50_wsht75"
                 print(param_name)
                 best_param_file = os.path.join(param_dir, f"bestparams_{param_name}.json")
@@ -1115,6 +1121,7 @@ if __name__ == '__main__':
                     training_depth=training_depth,
                     history_seed=train_seed,
                     reservoir_seed=reservoir_seed,
+                    learning_algo = "cholesky",
                     device=device
                 )
 
@@ -1204,6 +1211,11 @@ if __name__ == '__main__':
                     })
 
                     pred, true = predictor.predict_sequence(esn, z_eval)
+                    
+                    esn.trainer.debug_covariance()
+                    stats = esn.trainer.covariance_stats()
+                    print(stats)
+                    
                     all_preds.append(pred)
 
                     mae = mean_absolute_error(torch.tensor(pred), torch.tensor(true)).item()
