@@ -119,6 +119,21 @@ class ESN(torch.nn.Module):
         X_all = torch.cat(state_list,  dim=0)   # (B*(T-washout), res+1)
         Y_all = torch.cat(target_list, dim=0)   # (B*(T-washout), out_dim)
         self.W_out = self.trainer.fit(X_all, Y_all)
+        
+        #DEBUGGING
+        var = X_all[:, :-1].var(dim=0)             # exclude bias
+        n_dead = int((var < 1e-10).sum().item())
+        print(f"dead/near-constant features: {n_dead}/{X_all.shape[1]-1}")
+        # Right after fit() but before solving, print how many rows you have:
+        n_rows = len(state_list) and state_list[0].shape[0] * len(state_list)  # B*(T-washout)#TODO REMOVE
+        n_feat = state_list[0].shape[1]  # reservoir_size + 1
+        print(f"rows={n_rows}, features={n_feat}")
+        xvals = X_all[:, :-1]
+        sat = ((xvals > 0.99) | (xvals < -0.99)).float().mean().item()
+        print(f"saturation fraction (|x|>0.99): {sat:.3f}")
+        
+        
+        # High saturation → increase input_scaling, lower spectral_radius/leak_rate, or both.
         return self.W_out
 
     def forward(self, inputs: torch.Tensor, *, closed_loop_after_washout: bool = True) -> torch.Tensor:

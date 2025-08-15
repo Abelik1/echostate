@@ -32,3 +32,23 @@ class Trainer:
         rank = int((s > tol).sum().item())
         cond = (s.max() / s.min()).item()
         print(f"[DEBUG] covariance shape: {tuple(self.xTx.shape)}, rank: {rank}, condition #: {cond:.2e}")
+        
+    def covariance_stats(self):
+        """
+        Return dict of conditioning stats for XᵀX used in the last fit().
+        Call after fit().
+        """
+        assert self.xTx is not None, "Run fit() first."
+        with torch.no_grad():
+            s = torch.linalg.svdvals(self.xTx)
+            s_sorted, _ = torch.sort(s, descending=True)
+            tol = s_sorted[0] * max(self.xTx.shape) * torch.finfo(s.dtype).eps
+            rank = int((s_sorted > tol).sum().item())
+            cond = (s_sorted[0] / s_sorted[-1]).item() if s_sorted[-1] > 0 else float('inf')
+            return {
+                "shape": tuple(self.xTx.shape),
+                "rank": rank,
+                "cond": cond,
+                "sigma_max": s_sorted[0].item(),
+                "sigma_min": s_sorted[-1].item(),
+            }
