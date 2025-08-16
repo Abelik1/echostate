@@ -117,7 +117,15 @@ class ESN(torch.nn.Module):
         x = torch.zeros(B, self.reservoir_size, device=self.device)
         prev_fb = torch.zeros(B, self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
 
-        state_list, target_list = [], []
+        # --- streaming normal-equations accumulators (no X_all/Y_all) ---
+        n_feat = self.reservoir_size + 1
+        xTx = torch.zeros(n_feat, n_feat, device=self.device, dtype=inputs.dtype)
+        xTy = torch.zeros(n_feat, self.output_dim, device=self.device, dtype=inputs.dtype)
+
+        # optional light diagnostics (kept cheap)
+        diag_count = 0
+        run_mean = torch.zeros(self.reservoir_size, device=self.device, dtype=inputs.dtype)
+        run_m2   = torch.zeros(self.reservoir_size, device=self.device, dtype=inputs.dtype)
 
         for t in range(T):
             u_base = X[:, t, :]  # inputs at time t
@@ -130,51 +138,60 @@ class ESN(torch.nn.Module):
 
             if t >= self.washout:
                 bias_vec = self._ensure_batch_bias(x.shape[0])
-                xb = torch.cat([x, bias_vec], dim=1)
-                state_list.append(xb)
-                target_list.append(Y[:, t, :])
+                xb = torch.cat([x, bias_vec], dim=1)     # (B, R+1)
+                yt = Y[:, t, :]                          # (B, Dout)
+
+                # accumulate normal equations (streamed)
+                xTx += xb.mT @ xb                        # (R+1, R+1)
+                xTy += xb.mT @ yt                        # (R+1, Dout)
+
+                # cheap running stats for diagnostics (optional)
+                bsz = x.shape[0]
+                diag_count += bsz
+                delta = x.mean(dim=0) - run_mean
+                run_mean += (bsz / max(diag_count, 1)) * delta
+                # accumulate second moment around updated mean
+                run_m2 += ((x - run_mean).pow(2)).sum(dim=0)
 
             if self.feedback > 0:
                 prev_fb = torch.cat([prev_fb[:, self.output_dim:], Y[:, t, :]], dim=1)
 
-            if LOGGER.isEnabledFor(logging.DEBUG):  # or 5 if you keep TRACE
-                if self.step_log_every and (t % self.step_log_every != 0):
-                    pass  # skip most steps
-                else:
-                    LOGGER.debug("fit.step",
-                        extra={"extra": {
-                            "t": t,
-                            "post_washout": t >= self.washout,
-                            "x_stats": tensor_stats(x),
-                        }},
-                    )
+            
+            if self.step_log_every and LOGGER.isEnabledFor(logging.DEBUG) and (t % self.step_log_every == 0):
+                pass  # skip most steps
+            else:
+                LOGGER.debug("fit.step",
+                    extra={"extra": {
+                        "t": t,
+                        "post_washout": t >= self.washout,
+                        "x_stats": tensor_stats(x),
+                    }},
+                )
 
-        # solve readout in one shot
-        X_all = torch.cat(state_list,  dim=0)   # (B*(T-washout), res+1)
-        Y_all = torch.cat(target_list, dim=0)   # (B*(T-washout), out_dim)
+        # --- streamed diagnostics (approximate; no X_all allocated) ---
+        if diag_count > 0:
+            var = (run_m2 / max(diag_count, 1)).clamp_min(0)      # per-feature variance (no bias col)
+            n_dead = int((var < 1e-10).sum().item())
+        else:
+            n_dead = 0
+        n_rows = (B * max(T - self.washout, 0))
+        sat = ((x > 0.99) | (x < -0.99)).float().mean().item()    # crude saturation from last x
 
-        # Pre-solve diagnostics (dead features / saturation)
-        var = X_all[:, :-1].var(dim=0)
-        n_dead = int((var < 1e-10).sum().item())
-        n_rows = X_all.shape[0]
-        n_feat = X_all.shape[1]
-        xvals = X_all[:, :-1]
-        sat = ((xvals > 0.99) | (xvals < -0.99)).float().mean().item()
-
-        LOGGER.debug("Design matrix diagnostics",
+        LOGGER.debug("Design matrix diagnostics (streamed)",
             extra={"extra": {
-                "rows": n_rows, "features": n_feat, "dead_features": n_dead,
+                "rows": n_rows, "features": n_feat,
+                "dead_features": n_dead,
                 "saturation_fraction": float(sat)
             }},
         )
-        log_tensor(LOGGER, X_all, "X_all", level=logging.DEBUG)
-        log_tensor(LOGGER, Y_all, "Y_all", level=logging.DEBUG)
 
-        self.W_out = self.trainer.fit(X_all, Y_all)
+        # --- solve from normal equations (no X_all/Y_all) ---
+        self.W_out = self.trainer.fit_from_cov(xTx, xTy, n_feat)
 
         # Covariance stats (post-solve)
-        cov_stats = self.trainer.covariance_stats(safe=True)
-        LOGGER.info("Trainer covariance stats", extra={"extra": {"cov_stats": cov_stats}})
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            cov_stats = self.trainer.covariance_stats(safe=True)
+            LOGGER.debug("Trainer covariance stats", extra={"extra": {"cov_stats": cov_stats}})
 
         return self.W_out
 
@@ -216,13 +233,12 @@ class ESN(torch.nn.Module):
 
             last_y = y
 
-            if LOGGER.isEnabledFor(logging.DEBUG):
-                if self.step_log_every and (t % self.step_log_every != 0):
-                    pass
-                else:
-                    LOGGER.debug("forward.step",
-                        extra={"extra": {"t": t, "use_closed": use_closed, "y_stats": tensor_stats(y)}}
-                    )
+            if self.step_log_every and LOGGER.isEnabledFor(logging.DEBUG) and (t % self.step_log_every == 0):
+                pass
+            else:
+                LOGGER.debug("forward.step",
+                    extra={"extra": {"t": t, "use_closed": use_closed, "y_stats": tensor_stats(y)}}
+                )
 
         out = torch.stack(preds, dim=0)
         return out[self.washout:]
@@ -271,6 +287,8 @@ class ESN(torch.nn.Module):
              learning_algo='inv',
              **study_kwargs):
         import optuna
+        print("Using device:", device)
+        print("Learning algo", learning_algo)
         LOGGER.info("ESN.tune start",
             extra={"extra": {
                 "n_trials": n_trials, "washout": washout,

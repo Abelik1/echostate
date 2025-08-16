@@ -151,7 +151,59 @@ class Trainer:
 
         return W
 
-    
+    def fit_from_cov(self, xTx: torch.Tensor, xTy: torch.Tensor, n_feat: int, rcond: float | None = None):
+        """
+        Solve ridge/pinv from pre-accumulated normal equations:
+        (X^T X + λI) W^T = X^T Y
+        Supports: inv, cholesky, solve, eigh, cg, pinv (minimum-norm when λ=0).
+        """
+        self.xTx = xTx
+        self.xTy = xTy
+        I = torch.eye(n_feat, device=xTx.device, dtype=xTx.dtype)
+        lam = float(self.ridge_param)
+        algo = self.learning_algo
+
+        if algo == "inv":
+            A = xTx + lam * I
+            W = (torch.linalg.inv(A) @ xTy).T
+
+        elif algo == "cholesky":
+            A = xTx + lam * I
+            chol = torch.linalg.cholesky(A)
+            W = torch.cholesky_solve(xTy, chol).T
+
+        elif algo == "solve":
+            A = xTx + lam * I
+            W = torch.linalg.solve(A, xTy).T
+
+        elif algo == "eigh":
+            A = xTx + lam * I
+            evals, Q = torch.linalg.eigh(A)
+            eps = torch.finfo(A.dtype).eps
+            inv = 1.0 / torch.clamp(evals, min=eps)
+            W = (Q @ (inv.unsqueeze(-1) * (Q.mT @ xTy))).T
+
+        elif algo == "cg":
+            A = xTx + lam * I
+            Z, _ = torch.linalg.cg(A, xTy, maxiter=2000, rtol=1e-6, atol=0.0)
+            W = Z.T
+
+        elif algo == "pinv":
+            # Moore–Penrose via eigendecomp of xTx: W^T = V diag(1/(σ^2+λ)) V^T xTy
+            evals, V = torch.linalg.eigh(xTx)  # ascending, evals = σ^2
+            s2_max = torch.amax(evals)
+            if rcond is None:
+                rcond = 1e-12 if xTx.dtype == torch.float64 else 1e-6
+            keep = evals > (rcond * s2_max)
+            inv = torch.zeros_like(evals)
+            inv[keep] = 1.0 / (evals[keep] + lam)  # lam=0 -> min-norm pinv
+            W = (V @ (inv.unsqueeze(-1) * (V.mT @ xTy))).T
+
+        else:
+            raise NotImplementedError(f"Learning algorithm '{algo}' not supported from covariance.")
+
+        return W
+
     def debug_covariance(self): 
         s = torch.linalg.svdvals(self.xTx) 
         tol = s.max() * max(self.xTx.shape) * torch.finfo(s.dtype).eps 

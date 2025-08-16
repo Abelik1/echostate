@@ -18,9 +18,9 @@ warnings.filterwarnings(
 )
 
 # device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-device = torch.device('cpu') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
-# print(f"Using device: {device}")
+print(f"Using device: {device}")
 # print(torch.__version__)
 # print(torch.cuda.is_available())
 # print(torch.cuda.get_device_name(0))
@@ -302,7 +302,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [300,300],
+            reservoir_limit= [500,500],
             spectral_radius_limit=[0.7,1.7],
             feedback_limit=0,
             input_scaling_limit=[0.1, 0.6],
@@ -741,7 +741,7 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 # Example usage:
 # scorecard_physics("physics_summary.json")
 
-#region CONTROL  
+#region CONTROL
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
@@ -753,7 +753,7 @@ if __name__ == '__main__':
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 200 # Number of time series used to train 1 ESN
+    training_depth = 1000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
@@ -768,7 +768,7 @@ if __name__ == '__main__':
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
     n_trials   = 500
-    num_pred      = 40 
+    num_pred      = 40
 
 
     #Logging Settings
@@ -1190,7 +1190,7 @@ if __name__ == '__main__':
 
                     # fresh ESN for each seed (lazily constructed)
                     esn = predictor.make_esn(
-                        reservoir_size=best.get("reservoir_size", 1000),
+                        reservoir_size=best.get("reservoir_size", 500),
                         spectral_radius=best.get("spectral_radius", 0.99),
                         input_scaling=best.get("input_scaling", 1.01),
                         ridge_param=best.get("ridge_param", 0.00857),
