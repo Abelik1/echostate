@@ -248,6 +248,7 @@ class ESN(torch.nn.Module):
             return preds, {'mae': mae, 'mse': mse}
         return preds
 
+#region Tune
     # ------------ Tune (adds logging) ------------
     @staticmethod
     def tune(input_list,

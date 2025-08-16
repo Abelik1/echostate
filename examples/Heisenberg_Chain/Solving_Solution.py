@@ -302,12 +302,12 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [500,500],
-            spectral_radius_limit=[1.0,1.5],
+            reservoir_limit= [300,300],
+            spectral_radius_limit=[0.7,1.7],
             feedback_limit=0,
-            input_scaling_limit=[0.1, 0.3],
-            ridge_param_limit=[1e-1, 1.0],
-            leak_rate_limit=[ 0.2, 0.5],
+            input_scaling_limit=[0.1, 0.6],
+            ridge_param_limit=[1e-9, 1e-4],
+            leak_rate_limit=[ 0.01, 0.5],
             sparsity_limit= [0.1,0.2],
             bias_scaling_limit= 0.0,
             device=predictor.device,
@@ -749,25 +749,25 @@ if __name__ == '__main__':
     train_seed     = 3141
     reservoir_seed  = 3141
     pred_seed     = 3141
-    qubit_list     = [0]       # list of qubit indices
-    washout        = 75
+    qubit_list     = [0, 1]       # list of qubit indices
+    washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 50 # Number of time series used to train 1 ESN
+    training_depth = 200 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = False  # run Optuna tuning
+    do_tune        = True  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot
     
-    learning_algo = "solve" #cholesky / solve / eigh / cg/ svd / tsvd / qr / pinv
+    learning_algo = "pinv" #inv / cholesky / solve / eigh / cg/ svd / tsvd / qr / pinv
     
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
-    n_trials   = 2000
+    n_trials   = 500
     num_pred      = 40 
 
 
@@ -775,7 +775,7 @@ if __name__ == '__main__':
     import logging, os
     from echostate.logging_config import setup_logging
 
-    VERBOSITY = "INFO"           # one of: "INFO", "DEBUG"  (avoid TRACE unless deep dive)
+    VERBOSITY = "CRITICAL"          # one of: "INFO", "DEBUG"  (avoid TRACE unless deep dive), "CRITICAL" if none
     STEP_LOG_EVERY = 50           # log ESN step stats every N steps
     SILENCE_3P = True             # silence matplotlib/PIL/optuna/etc. at WARNING
 
@@ -795,7 +795,7 @@ if __name__ == '__main__':
     paths = setup_logging(
         log_dir="./logs",
         run_name=run_name,
-        console_level="INFO",      # console stays readable
+        console_level="CRITICAL",      # console stays readable # Critical
         file_level=VERBOSITY,      # file detail = DEBUG (good default)
         jsonl_file=True,
         plain_file=True,

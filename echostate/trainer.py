@@ -17,12 +17,16 @@ class Trainer:
     def fit(self, X, Y):
         X = X.to(self.device)
         Y = Y.to(self.device)
-        I = torch.eye(X.shape[1], device=self.device)
+        I = torch.eye(X.shape[1], device=self.device, dtype=X.dtype)
+
+        # Cache normal equations and full X/Y for algorithms that need them
         self.xTx = X.T @ X
         self.xTy = X.T @ Y
         self.X = X
         self.Y = Y
-        LOGGER.debug("Trainer.fit: formed X^T X and X^T Y",
+
+        LOGGER.debug(
+            "Trainer.fit: formed X^T X and X^T Y",
             extra={"extra": {
                 "X_shape": tuple(X.shape),
                 "Y_shape": tuple(Y.shape),
@@ -32,39 +36,36 @@ class Trainer:
         )
 
         try:
-            
-            if self.learning_algo == "inv":
-                W = (torch.linalg.inv(self.xTx + self.ridge_param * I) @ self.xTy).T
-            elif self.learning_algo == "cholesky":
-                chol = torch.linalg.cholesky(self.xTx + self.ridge_param * I)
+            algo = self.learning_algo
+            lam = float(self.ridge_param)
+
+            if algo == "inv":
+                W = (torch.linalg.inv(self.xTx + lam * I) @ self.xTy).T
+
+            elif algo == "cholesky":
+                chol = torch.linalg.cholesky(self.xTx + lam * I)
                 W = torch.cholesky_solve(self.xTy, chol).T
-                
+
             # ========= Methods that only need xTx and xTy (no full X) =========
-            elif self.learning_algo == "solve":
+            elif algo == "solve":
                 # Solve (X^T X + λI) W^T = X^T Y without factoring explicitly
-                A = self.xTx + self.ridge_param * I
+                A = self.xTx + lam * I
                 W = torch.linalg.solve(A, self.xTy).T
 
-            elif self.learning_algo == "eigh":
+            elif algo == "eigh":
                 # Eigenvalue (symmetric) factorization: A = Q Λ Q^T
-                A = self.xTx + self.ridge_param * I
-                # torch.linalg.eigh -> ascending eigenvalues
-                evals, Q = torch.linalg.eigh(A)
-                # Guard very small eigenvalues
+                A = self.xTx + lam * I
+                evals, Q = torch.linalg.eigh(A)  # ascending
                 eps = torch.finfo(A.dtype).eps
                 inv_evals = 1.0 / torch.clamp(evals, min=eps)
                 W = (Q @ (inv_evals.unsqueeze(-1) * (Q.mT @ self.xTy))).T
 
-            elif self.learning_algo == "cg":
+            elif algo == "cg":
                 # Conjugate Gradient on SPD normal matrix (good for large R)
-                # Solves A Z = xTy with A = xTx + λI, multiple RHS columns
-                A = self.xTx + self.ridge_param * I
+                A = self.xTx + lam * I
                 B = self.xTy  # shape: (R+1, d_out)
-
-                # Try to use torch.linalg.cg if available (PyTorch >= 2.1)
                 try:
                     Z, info = torch.linalg.cg(A, B, maxiter=2000, rtol=1e-6, atol=0.0)
-                    # info == 0 means converged
                     W = Z.T
                 except Exception:
                     # Fallback: simple batch CG loop (shared A, loop over RHS)
@@ -88,51 +89,54 @@ class Trainer:
                     W = torch.stack(Z_cols, dim=1).T
 
             # ========= Methods that require the full post-washout design X and Y =========
-            # (Store them as self.X (N x (R+1)) and self.Y (N x d_out) when you build xTx/xTy.)
-
-            elif self.learning_algo == "qr":
+            elif algo == "qr":
                 # Economy QR: X = Q R, solve R W^T = Q^T Y  (numerically stable LS)
-                Q, R = torch.linalg.qr(self.X, mode='reduced')
-                W = torch.linalg.solve(R + self.ridge_param * torch.eye(R.size(-1), dtype=R.dtype, device=R.device),
-                                    Q.mT @ self.Y).T
-                # Note: classic QR is for λ=0. For ridge, the line above implements a common
-                # "QR + diagonal loading" variant; for exact ridge, prefer SVD below.
+                Qm, R = torch.linalg.qr(self.X, mode='reduced')
+                W = torch.linalg.solve(
+                    R + lam * torch.eye(R.size(-1), dtype=R.dtype, device=R.device),
+                    Qm.mT @ self.Y
+                ).T
+                # Note: classic QR is for λ=0; the diagonal loading above is a common variant.
 
-            elif self.learning_algo == "svd":
+            elif algo == "svd":
                 # SVD ridge (most stable): X = U S V^T, W = V diag(S/(S^2+λ)) U^T Y
                 U, S, Vh = torch.linalg.svd(self.X, full_matrices=False)   # Vh = V^T
-                # Ridge shrinkage on singular values
-                denom = (S * S + self.ridge_param)
+                denom = (S * S + lam)
                 S_shrink = S / denom
                 W = (Vh.mT @ (S_shrink.unsqueeze(-1) * (U.mT @ self.Y))).T
 
-            elif self.learning_algo == "tsvd":
+            elif algo == "tsvd":
                 # Truncated SVD ridge: drop tiny singular values to reduce noise
                 U, S, Vh = torch.linalg.svd(self.X, full_matrices=False)
-                # Keep components above a relative threshold
-                rcond = 1e-6
+                rcond = 1e-12 if self.X.dtype == torch.float64 else 1e-6
                 keep = S > (rcond * S.max())
                 U_r = U[:, keep]
                 S_r = S[keep]
                 V_r = Vh.mT[:, keep]
-                S_shrink = S_r / (S_r * S_r + self.ridge_param)
+                S_shrink = S_r / (S_r * S_r + lam)
                 W = (V_r @ (S_shrink.unsqueeze(-1) * (U_r.mT @ self.Y))).T
 
-            elif self.learning_algo == "pinv":
-                # Moore-Penrose pseudoinverse (effectively SVD with default rcond)
-                # Ridge-like effect by adding λI before pinv if desired
-                X_reg = self.X
-                if self.ridge_param > 0:
-                    # Tikhonov trick: augment X and Y so that pinv gives ridge
-                    n_feat = self.X.shape[1]
-                    X_reg = torch.cat([self.X, torch.sqrt(self.ridge_param) * torch.eye(n_feat, device=self.X.device, dtype=self.X.dtype)], dim=0)
-                    Y_reg = torch.cat([self.Y, torch.zeros(n_feat, self.Y.shape[1], device=self.Y.device, dtype=self.Y.dtype)], dim=0)
+            elif algo == "pinv":
+                # Moore–Penrose via covariance eigendecomposition:
+                # W^T = V diag(1/(σ^2 + λ)) V^T (X^T Y), with truncation for tiny σ.
+                # This matches torch.linalg.pinv(X) @ Y (minimum-norm) when λ=0.
+                evals, V = torch.linalg.eigh(self.xTx)  # evals = σ^2 (ascending)
+                s2_max = torch.amax(evals)
+                rcond = 1e-12 if self.xTx.dtype == torch.float64 else 1e-6
+                keep = evals > (rcond * s2_max)
+
+                inv = torch.zeros_like(evals)
+                if lam == 0.0:
+                    inv[keep] = 1.0 / evals[keep]              # 1/σ^2 (pseudo-inverse on support)
                 else:
-                    Y_reg = self.Y
-                W = (torch.linalg.pinv(X_reg) @ Y_reg).T
+                    inv[keep] = 1.0 / (evals[keep] + lam)      # ridge-regularized pseudoinverse
+
+                W = (V @ (inv.unsqueeze(-1) * (V.mT @ self.xTy))).T
+
             else:
-                raise NotImplementedError(f"Learning algorithm '{self.learning_algo}' not implemented.")
-        except Exception as e:
+                raise NotImplementedError(f"Learning algorithm '{algo}' not implemented.")
+
+        except Exception:
             # Log conditioning stats to help debug failures
             stats = self.covariance_stats(safe=True)
             LOGGER.exception("Trainer.fit failed", extra={"extra": {"cov_stats": stats}})
@@ -141,12 +145,13 @@ class Trainer:
         # Log final stats
         try:
             from .logging_utils import tensor_stats
-            LOGGER.debug("Readout weights computed",
-                extra={"extra": {"W_out_stats": tensor_stats(W)}}
-            )
+            LOGGER.debug("Readout weights computed", extra={"extra": {"W_out_stats": tensor_stats(W)}})
         except Exception:
             pass
+
         return W
+
+    
     def debug_covariance(self): 
         s = torch.linalg.svdvals(self.xTx) 
         tol = s.max() * max(self.xTx.shape) * torch.finfo(s.dtype).eps 
