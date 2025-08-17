@@ -97,6 +97,7 @@ class ESN(torch.nn.Module):
         inputs/targets are assumed to be pre-aligned by the dataset (e.g., X[t] -> Y[t]).
         We collect states after washout and solve a single ridge regression.
         """
+        # print(self.device)
         # last=[time.perf_counter()]; print(f"Fit start, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         # stack list input
         if isinstance(inputs, list):

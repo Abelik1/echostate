@@ -19,7 +19,7 @@ class Trainer:
         X = X.to(self.device)
         Y = Y.to(self.device)
         I = torch.eye(X.shape[1], device=self.device, dtype=X.dtype)
-
+        # print(self.device)
         # Cache normal equations and full X/Y for algorithms that need them
         self.xTx = X.T @ X
         self.xTy = X.T @ Y

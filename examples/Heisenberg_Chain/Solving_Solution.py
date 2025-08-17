@@ -19,7 +19,7 @@ warnings.filterwarnings(
 )
 
 # device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 print(f"Using device: {device}")
 # print(torch.__version__)
@@ -303,8 +303,8 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [200,1000],
-            spectral_radius_limit=[1.0,1.7],
+            reservoir_limit= [500,1000],
+            spectral_radius_limit=[0.6,1.7],
             feedback_limit=0,
             input_scaling_limit=[0.1, 0.3],
             ridge_param_limit=[1e-11, 1e-3],
@@ -746,15 +746,15 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [5]
+    N_list         = [6]
     train_seed     = 314
     reservoir_seed  = 314
     pred_seed     = 314
-    qubit_list     = [0, 1, 2, 3, 4]       # list of qubit indices
-    washout        = 150
+    qubit_list     = [0]       # list of qubit indices
+    washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 5000 # Number of time series used to train 1 ESN
+    training_depth = 1000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
@@ -763,7 +763,7 @@ if __name__ == '__main__':
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot
     
-    learning_algo = "pinv" #inv / cholesky / solve / eigh / cg/ svd / tsvd / qr / pinv
+    learning_algo = "pinv" # inv / cholesky / solve / eigh / cg / svd / tsvd / qr / pinv
     
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far

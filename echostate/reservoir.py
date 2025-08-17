@@ -35,7 +35,7 @@ class Reservoir:
         # reservoir recurrent weights on CPU for eigen-decomp
         W = self._initialize_reservoir(reservoir_size, spectral_radius, sparsity)
         self.W = W.to(self.device)
-
+        # print(device)
         LOGGER.debug(
             "Reservoir init",
             extra={"extra": {
