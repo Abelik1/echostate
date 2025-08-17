@@ -2,6 +2,7 @@
 import logging
 import torch
 from .utils import compute_spectral_radius
+import time
 
 LOGGER = logging.getLogger(__name__)
 

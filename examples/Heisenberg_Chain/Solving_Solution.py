@@ -9,6 +9,7 @@ from .Heisenberg_sim import HeisenbergChain
 import matplotlib.pyplot as plt
 from qutip import Qobj, sigmaz, expect
 import pandas as pd
+import time
 
 import warnings
 warnings.filterwarnings(
@@ -302,13 +303,13 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [500,500],
-            spectral_radius_limit=[0.7,1.7],
+            reservoir_limit= [200,1000],
+            spectral_radius_limit=[1.0,1.7],
             feedback_limit=0,
-            input_scaling_limit=[0.1, 0.6],
-            ridge_param_limit=[1e-9, 1e-4],
-            leak_rate_limit=[ 0.01, 0.5],
-            sparsity_limit= [0.1,0.2],
+            input_scaling_limit=[0.1, 0.3],
+            ridge_param_limit=[1e-11, 1e-3],
+            leak_rate_limit=[ 0.2, 1.0],
+            sparsity_limit= [0.01,0.1],
             bias_scaling_limit= 0.0,
             device=predictor.device,
             learning_algo= learning_algo
@@ -746,18 +747,18 @@ if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
     N_list         = [5]
-    train_seed     = 3141
-    reservoir_seed  = 3141
-    pred_seed     = 3141
-    qubit_list     = [0, 1]       # list of qubit indices
-    washout        = 120
+    train_seed     = 314
+    reservoir_seed  = 314
+    pred_seed     = 314
+    qubit_list     = [0, 1, 2, 3, 4]       # list of qubit indices
+    washout        = 150
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 1000 # Number of time series used to train 1 ESN
+    training_depth = 5000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
-    do_tune        = True  # run Optuna tuning
+    do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot

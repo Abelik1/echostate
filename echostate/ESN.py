@@ -5,7 +5,7 @@ from .reservoir import Reservoir
 from .trainer import Trainer
 from .utils import mean_absolute_error, mean_squared_error
 from .logging_utils import log_tensor, tensor_stats
-
+import time
 LOGGER = logging.getLogger(__name__)
 
 class ESN(torch.nn.Module):
@@ -90,13 +90,14 @@ class ESN(torch.nn.Module):
         if self._batch_bias is None or self._batch_bias.shape[0] != batch_sz:
             self._batch_bias = torch.ones(batch_sz, 1, device=self.device) * self.bias_scaling
         return self._batch_bias
-
+#region Fit
     def fit(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Teacher-forced training with progressive history:
         inputs/targets are assumed to be pre-aligned by the dataset (e.g., X[t] -> Y[t]).
         We collect states after washout and solve a single ridge regression.
         """
+        # last=[time.perf_counter()]; print(f"Fit start, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         # stack list input
         if isinstance(inputs, list):
             inputs  = torch.stack(inputs,  dim=0)
@@ -192,7 +193,7 @@ class ESN(torch.nn.Module):
         if LOGGER.isEnabledFor(logging.DEBUG):
             cov_stats = self.trainer.covariance_stats(safe=True)
             LOGGER.debug("Trainer covariance stats", extra={"extra": {"cov_stats": cov_stats}})
-
+        # last=[time.perf_counter()]; print(f"Fit Last, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         return self.W_out
 
     def forward(self, inputs: torch.Tensor, *, closed_loop_after_washout: bool = True) -> torch.Tensor:
@@ -200,6 +201,7 @@ class ESN(torch.nn.Module):
         Inference with closed-loop after washout.
         Returns predictions trimmed by washout: out[washout:].
         """
+        # last=[time.perf_counter()]; print(f"Forward Start, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         assert self.W_out is not None, "Model must be fit before forward()"
         T, Din = inputs.shape
         X = inputs.to(self.device)
@@ -241,12 +243,14 @@ class ESN(torch.nn.Module):
                 )
 
         out = torch.stack(preds, dim=0)
+        # last=[time.perf_counter()]; print("Forward Finish, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         return out[self.washout:]
 
     def predict(self, input_list, target_list=None):
         """
         Batch-predict with optional metrics.
         """
+        # last=[time.perf_counter()]; print(f"Predict start, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         preds = []
         with torch.no_grad():
             for i, seq in enumerate(input_list):
@@ -262,11 +266,14 @@ class ESN(torch.nn.Module):
             mse = mean_squared_error(P, y_true).item()
             LOGGER.info("predict.metrics", extra={"extra": {"mae": float(mae), "mse": float(mse)}})
             return preds, {'mae': mae, 'mse': mse}
+        # last=[time.perf_counter()]; print(f"Predict End, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         return preds
 
 #region Tune
     # ------------ Tune (adds logging) ------------
+
     @staticmethod
+   
     def tune(input_list,
              target_list,
              device=None,
@@ -287,6 +294,7 @@ class ESN(torch.nn.Module):
              learning_algo='inv',
              **study_kwargs):
         import optuna
+        import math
         print("Using device:", device)
         print("Learning algo", learning_algo)
         LOGGER.info("ESN.tune start",
@@ -297,7 +305,7 @@ class ESN(torch.nn.Module):
         )
         X_tensor = torch.stack(input_list, dim=0).to(device)
         Y_tensor = torch.stack(target_list, dim=0).to(device)
-
+        
         def objective(trial):
             # suggest hyperparams
             reservoir_size = trial.suggest_int('reservoir_size', *reservoir_limit) if isinstance(reservoir_limit, list) else reservoir_limit
@@ -342,13 +350,15 @@ class ESN(torch.nn.Module):
             ).to(device)
 
             model.fit(X_tensor, Y_tensor)
-            _, metrics = model.predict(input_list, target_list)
+            _, metrics = model.predict(input_list[:10], target_list[:10])
 
             LOGGER.info("Trial result",
                 extra={"extra": {"trial": trial.number, "mae": float(metrics['mae']), "mse": float(metrics['mse'])}}
             )
-            return metrics['mae']
-
+            return math.log1p(metrics['mae'])
+            # return metrics['mae']
+        
+        # last=[time.perf_counter()]; print(f"{time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         study = optuna.create_study(
             direction=direction,
             study_name=study_name,
@@ -356,4 +366,5 @@ class ESN(torch.nn.Module):
             load_if_exists=True
         )
         study.optimize(objective, n_trials=n_trials, **study_kwargs)
+        # last=[time.perf_counter()]; print(f"{time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
         return study

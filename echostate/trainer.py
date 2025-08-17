@@ -1,6 +1,7 @@
 # echostate/trainer.py
 import logging
 import torch
+import time
 
 LOGGER = logging.getLogger(__name__)
 
