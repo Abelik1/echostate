@@ -6,6 +6,55 @@ from .trainer import Trainer
 from .utils import mean_absolute_error, mean_squared_error
 from .logging_utils import log_tensor, tensor_stats
 import time
+
+import os
+import time
+
+# === Lightweight print profiler (no logging) ===
+def _fmt_tensor(name, t):
+    if t is None:
+        return f"{name}: None"
+    if not isinstance(t, torch.Tensor):
+        return f"{name}: (not a tensor) {type(t)}"
+    pinned = getattr(t, "is_pinned", lambda: False)()
+    return (f"{name}: shape={tuple(t.shape)}, dtype={t.dtype}, device={t.device}, "
+            f"pinned={pinned}, requires_grad={t.requires_grad}")
+
+class _Profiler:
+    def __init__(self, tag, device):
+        self.tag = tag
+        self.device = device if isinstance(device, torch.device) else torch.device(str(device))
+        self.t0 = time.perf_counter()
+        self.tl = self.t0
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        print(f"\n[PROFILE] {self.tag} START (device={self.device})")
+
+    def tick(self, label, extra=None):
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        now = time.perf_counter()
+        dt = now - self.tl
+        tot = now - self.t0
+        msg = f"[PROFILE] {self.tag} :: {label}: +{dt:.6f}s (total {tot:.6f}s)"
+        if extra:
+            msg += " | " + str(extra)
+        print(msg)
+        self.tl = now
+
+    def mem(self, label="mem"):
+        if self.device.type == "cuda":
+            idx = self.device.index or 0
+            alloc = torch.cuda.memory_allocated(idx) / 1e9
+            reserved = torch.cuda.memory_reserved(idx) / 1e9
+            self.tick(label, f"cuda_alloc={alloc:.3f}GB, cuda_reserved={reserved:.3f}GB")
+        else:
+            self.tick(label)
+
+def _env_profile_on():
+    v = os.getenv("ESN_PROFILE", "0")
+    return v.lower() in ("1", "true", "yes", "y")
+
 LOGGER = logging.getLogger(__name__)
 
 class ESN(torch.nn.Module):
@@ -31,6 +80,7 @@ class ESN(torch.nn.Module):
         batch_size: int = None,
         seed: int = None,
         step_log_every: int | None = None,
+        profile: bool = False, 
     ):
         super().__init__()
         # device + optional seeding
@@ -51,6 +101,8 @@ class ESN(torch.nn.Module):
         self.batch_size = batch_size
         self.learning_algo = learning_algo
         self.step_log_every = step_log_every
+        
+        self.profile = profile or _env_profile_on()
         # components
         self.reservoir = Reservoir(
             input_dim=self.input_dim,
@@ -61,11 +113,14 @@ class ESN(torch.nn.Module):
             bias_scaling=bias_scaling,
             seed=seed,
             device=self.device,
+            profile=self.profile,      
         )
         self.trainer = Trainer(
             ridge_param=ridge_param,
             learning_algo=learning_algo,
             device=self.device,
+            profile=self.profile, 
+            
         )
 
         # readout weights and buffers
@@ -91,110 +146,128 @@ class ESN(torch.nn.Module):
             self._batch_bias = torch.ones(batch_sz, 1, device=self.device) * self.bias_scaling
         return self._batch_bias
 #region Fit
-    def fit(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """
-        Teacher-forced training with progressive history:
-        inputs/targets are assumed to be pre-aligned by the dataset (e.g., X[t] -> Y[t]).
-        We collect states after washout and solve a single ridge regression.
-        """
-        # print(self.device)
-        # last=[time.perf_counter()]; print(f"Fit start, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
-        # stack list input
+    def fit(self, inputs: torch.Tensor, targets: torch.Tensor, *, profile: bool = False) -> torch.Tensor:
+        prof_on = profile or self.profile
+        prof = _Profiler("ESN.fit", self.device) if prof_on else None
+
+        # Accept list -> stack
         if isinstance(inputs, list):
+            if prof_on: print(_fmt_tensor("inputs(arg list[0])", inputs[0]), _fmt_tensor("targets(arg list[0])", targets[0]))
             inputs  = torch.stack(inputs,  dim=0)
             targets = torch.stack(targets, dim=0)
 
+        if prof_on:
+            print(_fmt_tensor("inputs(arg)", inputs))
+            print(_fmt_tensor("targets(arg)", targets))
+            if prof: prof.mem("before .to(device)")
+
         B, T, Din = inputs.shape
         assert T > self.washout, "Need at least washout+1 steps for next-step training."
-        X = inputs.to(self.device)
-        Y = targets.to(self.device)
 
-        LOGGER.info("ESN.fit start",
-            extra={"extra": {"B": B, "T": T, "Din": Din, "washout": self.washout}}
-        )
+        # Move once to device
+        X = inputs.to(self.device, non_blocking=True)
+        Y = targets.to(self.device, non_blocking=True)
+
+        if prof_on:
+            print(_fmt_tensor("X(dev)", X))
+            print(_fmt_tensor("Y(dev)", Y))
+            if prof: prof.mem("after .to(device)")
+
+        LOGGER.info("ESN.fit start", extra={"extra": {"B": B, "T": T, "Din": Din, "washout": self.washout}})
         log_tensor(LOGGER, X, "inputs(batch)", level=logging.DEBUG)
         log_tensor(LOGGER, Y, "targets(batch)", level=logging.DEBUG)
 
-        # initial reservoir state + feedback buffer (holds past outputs)
-        x = torch.zeros(B, self.reservoir_size, device=self.device)
-        prev_fb = torch.zeros(B, self.feedback * self.output_dim, device=self.device) if self.feedback > 0 else None
+        # State & feedback
+        x = torch.zeros(B, self.reservoir_size, device=self.device, dtype=X.dtype)
+        prev_fb = torch.zeros(B, self.feedback * self.output_dim, device=self.device, dtype=X.dtype) if self.feedback > 0 else None
 
-        # --- streaming normal-equations accumulators (no X_all/Y_all) ---
+        # Accumulators
         n_feat = self.reservoir_size + 1
-        xTx = torch.zeros(n_feat, n_feat, device=self.device, dtype=inputs.dtype)
-        xTy = torch.zeros(n_feat, self.output_dim, device=self.device, dtype=inputs.dtype)
+        xTx = torch.zeros(n_feat, n_feat, device=self.device, dtype=X.dtype)
+        xTy = torch.zeros(n_feat, self.output_dim, device=self.device, dtype=X.dtype)
 
-        # optional light diagnostics (kept cheap)
+        # Light stats
         diag_count = 0
-        run_mean = torch.zeros(self.reservoir_size, device=self.device, dtype=inputs.dtype)
-        run_m2   = torch.zeros(self.reservoir_size, device=self.device, dtype=inputs.dtype)
+        run_mean = torch.zeros(self.reservoir_size, device=self.device, dtype=X.dtype)
+        run_m2   = torch.zeros(self.reservoir_size, device=self.device, dtype=X.dtype)
 
+        # CUDA event timing for reservoir loop
+        if prof_on and self.device.type == "cuda":
+            ev0 = torch.cuda.Event(enable_timing=True)
+            ev1 = torch.cuda.Event(enable_timing=True)
+            torch.cuda.synchronize()
+            ev0.record()
+
+        # ----- main time loop -----
         for t in range(T):
-            u_base = X[:, t, :]  # inputs at time t
-            if self.feedback > 0:
-                u = torch.cat([u_base, prev_fb], dim=1)
-            else:
-                u = u_base
+            u_base = X[:, t, :]
+            u = torch.cat([u_base, prev_fb], dim=1) if self.feedback > 0 else u_base
 
             x = self.reservoir.update_batch(x, u, self.leak_rate)
 
             if t >= self.washout:
                 bias_vec = self._ensure_batch_bias(x.shape[0])
-                xb = torch.cat([x, bias_vec], dim=1)     # (B, R+1)
-                yt = Y[:, t, :]                          # (B, Dout)
+                xb = torch.cat([x, bias_vec], dim=1)    # (B, R+1)
+                yt = Y[:, t, :]                         # (B, Dout)
 
-                # accumulate normal equations (streamed)
-                xTx += xb.mT @ xb                        # (R+1, R+1)
-                xTy += xb.mT @ yt                        # (R+1, Dout)
+                xTx += xb.mT @ xb                       # (R+1, R+1)
+                xTy += xb.mT @ yt                       # (R+1, Dout)
 
-                # cheap running stats for diagnostics (optional)
+                # running stats
                 bsz = x.shape[0]
                 diag_count += bsz
                 delta = x.mean(dim=0) - run_mean
                 run_mean += (bsz / max(diag_count, 1)) * delta
-                # accumulate second moment around updated mean
                 run_m2 += ((x - run_mean).pow(2)).sum(dim=0)
 
             if self.feedback > 0:
                 prev_fb = torch.cat([prev_fb[:, self.output_dim:], Y[:, t, :]], dim=1)
 
-            
             if self.step_log_every and LOGGER.isEnabledFor(logging.DEBUG) and (t % self.step_log_every == 0):
-                pass  # skip most steps
+                pass
             else:
-                LOGGER.debug("fit.step",
-                    extra={"extra": {
-                        "t": t,
-                        "post_washout": t >= self.washout,
-                        "x_stats": tensor_stats(x),
-                    }},
-                )
+                LOGGER.debug("fit.step", extra={"extra": {"t": t, "post_washout": t >= self.washout, "x_stats": tensor_stats(x)}})
 
-        # --- streamed diagnostics (approximate; no X_all allocated) ---
+        # Stop CUDA timing
+        if prof_on and self.device.type == "cuda":
+            ev1.record()
+            torch.cuda.synchronize()
+            ms = ev0.elapsed_time(ev1)
+            print(f"[PROFILE] ESN.fit :: reservoir loop CUDA time: {ms/1000:.6f}s (GPU kernels only)")
+
+        if prof_on:
+            if prof: prof.tick("reservoir loop complete")
+            print(_fmt_tensor("xTx", xTx))
+            print(_fmt_tensor("xTy", xTy))
+            if prof: prof.mem("after accumulators")
+
+        # Diagnostics
         if diag_count > 0:
-            var = (run_m2 / max(diag_count, 1)).clamp_min(0)      # per-feature variance (no bias col)
+            var = (run_m2 / max(diag_count, 1)).clamp_min(0)
             n_dead = int((var < 1e-10).sum().item())
         else:
             n_dead = 0
         n_rows = (B * max(T - self.washout, 0))
-        sat = ((x > 0.99) | (x < -0.99)).float().mean().item()    # crude saturation from last x
+        sat = ((x > 0.99) | (x < -0.99)).float().mean().item()
+        LOGGER.debug("Design matrix diagnostics (streamed)", extra={"extra": {
+            "rows": n_rows, "features": n_feat, "dead_features": n_dead, "saturation_fraction": float(sat)
+        }})
 
-        LOGGER.debug("Design matrix diagnostics (streamed)",
-            extra={"extra": {
-                "rows": n_rows, "features": n_feat,
-                "dead_features": n_dead,
-                "saturation_fraction": float(sat)
-            }},
-        )
-
-        # --- solve from normal equations (no X_all/Y_all) ---
+        # Solve
+        self.trainer._profile = prof_on  # inform trainer
         self.W_out = self.trainer.fit_from_cov(xTx, xTy, n_feat)
 
-        # Covariance stats (post-solve)
+        if prof_on:
+            print(_fmt_tensor("W_out", self.W_out))
+            if prof: 
+                prof.mem("after solve")
+                prof.tick("fit end")
+
+        # Post-solve cov stats (logged)
         if LOGGER.isEnabledFor(logging.DEBUG):
             cov_stats = self.trainer.covariance_stats(safe=True)
             LOGGER.debug("Trainer covariance stats", extra={"extra": {"cov_stats": cov_stats}})
-        # last=[time.perf_counter()]; print(f"Fit Last, {time.perf_counter():.3f}s since start, {time.perf_counter()-last[0]:.3f}s since last"); last[0]=time.perf_counter()
+
         return self.W_out
 
     def forward(self, inputs: torch.Tensor, *, closed_loop_after_washout: bool = True) -> torch.Tensor:

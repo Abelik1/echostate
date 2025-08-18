@@ -17,12 +17,15 @@ class Reservoir:
         bias_scaling: float,
         seed: int = None,
         device: torch.device = torch.device('cpu'),
+        profile: bool = False,    
     ):
         if seed is not None:
             torch.manual_seed(seed)
         self.device = device
         self.reservoir_size = reservoir_size
-
+        
+        self.profile = profile                     
+        self._warned_dev = False 
         # input weights
         self.W_in = torch.empty(reservoir_size, input_dim, device=self.device)
         self.W_in.uniform_(-input_scaling, input_scaling)
@@ -70,10 +73,16 @@ class Reservoir:
         return W
 
     def update_batch(self, x: torch.Tensor, u: torch.Tensor, leak_rate: float) -> torch.Tensor:
+        # Device auto-fix + one-time warning if we had to move tensors
+        moved = False
         if x.device != self.device:
-            x = x.to(self.device)
+            x = x.to(self.device, non_blocking=True); moved = True
         if u.device != self.device:
-            u = u.to(self.device)
+            u = u.to(self.device, non_blocking=True); moved = True
+        if moved and self.profile and not self._warned_dev:
+            print(f"[PROFILE][Reservoir] Moved tensors to {self.device} inside update_batch(). "
+                f"This adds CPU overhead. Ensure caller passes tensors already on {self.device}.")
+            self._warned_dev = True
 
         if x.dim() == 1:  # make batch dim
             x = x.unsqueeze(0)

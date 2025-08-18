@@ -162,7 +162,7 @@ class ESNPredictor:
         """Fit a provided ESN on the prepared dataset."""
         inputs, targets = self.build_dataset()
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
-        esn.fit(inputs, targets)
+        esn.fit(inputs, targets, profile=True)
         
 
     def predict_sequence(self, esn, z_test):

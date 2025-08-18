@@ -8,12 +8,13 @@ LOGGER = logging.getLogger(__name__)
 class Trainer:
     def __init__(self, ridge_param: float = 1e-6,
                  learning_algo: str = 'inv',
-                 device: torch.device = torch.device('cpu')):
+                 device: torch.device = torch.device('cpu'),profile: bool = False):
         self.ridge_param = ridge_param
         self.learning_algo = learning_algo
         self.device = device
         self.xTx = None
         self.xTy = None
+        self._profile = profile   
 
     def fit(self, X, Y):
         X = X.to(self.device)
@@ -153,16 +154,28 @@ class Trainer:
         return W
 
     def fit_from_cov(self, xTx: torch.Tensor, xTy: torch.Tensor, n_feat: int, rcond: float | None = None):
-        """
-        Solve ridge/pinv from pre-accumulated normal equations:
-        (X^T X + λI) W^T = X^T Y
-        Supports: inv, cholesky, solve, eigh, cg, pinv (minimum-norm when λ=0).
-        """
         self.xTx = xTx
         self.xTy = xTy
         I = torch.eye(n_feat, device=xTx.device, dtype=xTx.dtype)
         lam = float(self.ridge_param)
         algo = self.learning_algo
+        prof_on = getattr(self, "_profile", False)
+
+        if prof_on:
+            print(f"[PROFILE][Trainer.fit_from_cov] algo={algo}, lam={lam:g}")
+            print(_fmt_tensor("xTx", xTx))
+            print(_fmt_tensor("xTy", xTy))
+            print(_fmt_tensor("I", I))
+            if xTx.device.type == "cuda":
+                idx = xTx.device.index or 0
+                alloc = torch.cuda.memory_allocated(idx)/1e9
+                resv  = torch.cuda.memory_reserved(idx)/1e9
+                print(f"[PROFILE][Trainer] cuda_alloc={alloc:.3f}GB, cuda_reserved={resv:.3f}GB")
+
+        # Time the solve (with CUDA sync for accurate wall time)
+        if xTx.device.type == "cuda":
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
 
         if algo == "inv":
             A = xTx + lam * I
@@ -190,19 +203,24 @@ class Trainer:
             W = Z.T
 
         elif algo == "pinv":
-            # Moore–Penrose via eigendecomp of xTx: W^T = V diag(1/(σ^2+λ)) V^T xTy
             evals, V = torch.linalg.eigh(xTx)  # ascending, evals = σ^2
             s2_max = torch.amax(evals)
             if rcond is None:
                 rcond = 1e-12 if xTx.dtype == torch.float64 else 1e-6
             keep = evals > (rcond * s2_max)
             inv = torch.zeros_like(evals)
-            inv[keep] = 1.0 / (evals[keep] + lam)  # lam=0 -> min-norm pinv
+            inv[keep] = 1.0 / (evals[keep] + lam)
             W = (V @ (inv.unsqueeze(-1) * (V.mT @ xTy))).T
 
         else:
             raise NotImplementedError(f"Learning algorithm '{algo}' not supported from covariance.")
 
+        if xTx.device.type == "cuda":
+            torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        if prof_on:
+            print(f"[PROFILE][Trainer.fit_from_cov] solve({algo}) wall time: {(t1 - t0):.6f}s")
+            print(_fmt_tensor("W_out", W))
         return W
 
     def debug_covariance(self): 
