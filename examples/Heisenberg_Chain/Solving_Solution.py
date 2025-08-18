@@ -19,7 +19,7 @@ warnings.filterwarnings(
 )
 
 # device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cpu') if torch.cuda.is_available() else torch.device('cpu')
 
 print(f"Using device: {device}")
 # print(torch.__version__)
@@ -747,10 +747,10 @@ if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
     N_list         = [5]
-    train_seed     = 314
+    train_seed     = 3141
     reservoir_seed  = 314
-    pred_seed     = 314
-    qubit_list     = [0]       # list of qubit indices
+    pred_seed     = 3141
+    qubit_list     = [0,1,2,3,4]       # list of qubit indices
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
@@ -873,10 +873,11 @@ if __name__ == '__main__':
                 plots=False,
                 learning_algo=learning_algo,
             )
-            
+#endregion
+          
 #region Predictions
     elif do_predictions:
-        
+
         from glob import glob
 
         model_dir = "./examples/Heisenberg_Chain/cache/"
@@ -898,9 +899,15 @@ if __name__ == '__main__':
                 fmt_dt_val = str(dt).rstrip("0").rstrip(".").replace(".", "_", 1)
                 qubit_tag = f"Qbts({(0 if ignore_qubit else qubit) + 1}){N}"
                 extra_wash = 75 if ignore_washout else washout
-                param_name = f"Seed31415_{qubit_tag}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
+
+                # === match official_run naming ===
+                # bestparams file
+                param_name = f"{learning_algo}_Seed3141_Qbts({1}){N}_dt{fmt_dt_val}_dpth50_wsht{extra_wash}"
                 best_param_file = os.path.join(param_dir, f"bestparams_{param_name}.json")
-                base_name = f"N{N}_{qubit_tag}_dt{fmt_dt_val}"
+
+                # base_name used in model/fig paths
+                base_name = f"{learning_algo}_batchSize{training_depth}_{qubit_tag}_dt{fmt_dt_val}"
+                # =================================
 
                 # Load best params if available
                 try:
@@ -917,23 +924,22 @@ if __name__ == '__main__':
                     steps=steps,
                     dt=dt,
                     N=N,
-                    qubit=(qubit if not ignore_qubit else 0),
+                    qubit=qubit,
                     history_values=None,
                     washout=washout,
                     batch_size=training_depth,
                     training_depth=training_depth,
                     history_seed=train_seed,        # training dataset seed (not used here for data gen)
                     reservoir_seed=reservoir_seed,  # ESN reservoir seed base (documentary)
+                    learning_algo=learning_algo,    # <-- match official_run signature
                     device=device
                 )
 
                 # Load the ESN named after the TRAIN seed (Ex0 by convention) -- for the per-dataset metrics
-                model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed{reservoir_seed}_{base_name}.pt")
-                # if not os.path.exists(model_path):
-                #     # fall back to original single-model name if needed
-                #     alt_path = os.path.join(model_dir, f"trainedmodel_{N}_{qubit_tag}.pt")
-                #     if os.path.exists(alt_path):
-                #         model_path = alt_path
+                model_path = os.path.join(
+                    model_dir,
+                    f"trainedmodel_Seed{train_seed}_rSeed{reservoir_seed}_{base_name}.pt"
+                )
 
                 if os.path.exists(model_path):
                     print(f"Loading ESN from {model_path}")
@@ -957,6 +963,7 @@ if __name__ == '__main__':
                     training_depth=num_pred,     # drives how many histories are generated/cached
                     history_seed=pred_seed,      # NEW: prediction datasets seed
                     reservoir_seed=pred_seed,    # not used for caching; harmless
+                    learning_algo=learning_algo, # <-- match official_run signature
                     device=device
                 )
                 pred_histories = predictor_pred.prepare_histories()  # list length == num_pred
@@ -966,15 +973,31 @@ if __name__ == '__main__':
                 first_plot_done = False
                 records = []
 
+                q_idx = qubit  # mirror official_run's qubit selection
+
                 for d, z_seq in enumerate(pred_histories):
-                    pred_d, true_d = predictor_model.predict_sequence(esn_single, np.asarray(z_seq))
+                    z_arr = np.asarray(z_seq)
+
+                    # === Make input match official_run: 1D series for the target qubit ===
+                    if z_arr.ndim == 2:
+                        if z_arr.shape[1] == N:
+                            z_eval = z_arr[:, q_idx]        # (T, N) -> take column
+                        elif z_arr.shape[0] == N:
+                            z_eval = z_arr[q_idx, :]        # (N, T) -> take row
+                        else:
+                            z_eval = z_arr.squeeze()
+                    else:
+                        z_eval = z_arr.squeeze()
+                    # ===================================
+
+                    pred_d, true_d = predictor_model.predict_sequence(esn_single, z_eval)
                     mae_d = mean_absolute_error(torch.tensor(pred_d), torch.tensor(true_d)).item()
                     rmse_d = float(np.sqrt(np.mean((pred_d - true_d)**2)))
 
                     records.append({
                         "N": N, "qubit": qubit,
                         "dataset_index": d,
-                        "seed": pred_seed + d,  # implicit generation order
+                        "seed": pred_seed + d,
                         "MAE": mae_d,
                         "RMSE": rmse_d,
                         "T_effective": len(pred_d)
@@ -1005,11 +1028,10 @@ if __name__ == '__main__':
                 all_scores.extend(records)
                 maes = df["MAE"].values
                 print(f"(N={N}, q={qubit}) MAE over {num_pred} datasets — "
-                    f"mean={np.mean(maes):.4f}, std={np.std(maes):.4f}, "
-                    f"min={np.min(maes):.4f}, max={np.max(maes):.4f}")
+                      f"mean={np.mean(maes):.4f}, std={np.std(maes):.4f}, "
+                      f"min={np.min(maes):.4f}, max={np.max(maes):.4f}")
 
-                # ── Part B: NEW — histogram over ESNs with varying rseed (dataset 0 only) ──
-                # Find all ESNs trained by official_run for this (N, qubit), any rseed / Ex index
+                # ── Part B: histogram over ESNs with varying rseed (dataset 0 only) ──
                 pattern = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed*_{base_name}.pt")
                 esn_paths = sorted(glob(pattern))
                 if not esn_paths:
@@ -1017,11 +1039,20 @@ if __name__ == '__main__':
                 else:
                     print(f"[hist] Found {len(esn_paths)} ESN files for histogram.")
 
-                    # Use the FIRST prediction dataset as requested
                     if len(pred_histories) == 0:
                         print("[hist] No prediction datasets available; skipping histogram.")
                     else:
-                        z_seq0 = np.asarray(pred_histories[0])
+                        # Use dataset 0 and select the target qubit exactly like above
+                        z0 = np.asarray(pred_histories[0])
+                        if z0.ndim == 2:
+                            if z0.shape[1] == N:
+                                z0_eval = z0[:, q_idx]
+                            elif z0.shape[0] == N:
+                                z0_eval = z0[q_idx, :]
+                            else:
+                                z0_eval = z0.squeeze()
+                        else:
+                            z0_eval = z0.squeeze()
 
                         ln_maes = []
                         raw_maes = []
@@ -1031,21 +1062,25 @@ if __name__ == '__main__':
                             try:
                                 esn_i = torch.load(pth, weights_only=False)
                                 esn_i.to(device).eval()
-                                pred_i, true_i = predictor_model.predict_sequence(esn_i, z_seq0)
+                                pred_i, true_i = predictor_model.predict_sequence(esn_i, z0_eval)
                                 mae_i = mean_absolute_error(torch.tensor(pred_i), torch.tensor(true_i)).item()
                                 raw_maes.append(mae_i)
-                                # Extract rseed from filename: trainedmodel_Seed{rseed}_...
-                                # fall back to None if pattern unexpected
-                                rseed_str = os.path.basename(pth).split("_")[1]
-                                if rseed_str.startswith("Seed"):
-                                    rseed_list.append(int(rseed_str.replace("Seed", "")))
-                                else:
-                                    rseed_list.append(None)
+
+                                # Extract rSeed from filename part that starts with "rSeed"
+                                parts = os.path.basename(pth).split("_")
+                                rseed_val = None
+                                for part in parts:
+                                    if part.startswith("rSeed"):
+                                        try:
+                                            rseed_val = int(part.replace("rSeed", ""))
+                                        except ValueError:
+                                            rseed_val = None
+                                        break
+                                rseed_list.append(rseed_val)
                             except Exception as e:
                                 print(f"[hist] Skipping {pth} due to error: {e}")
 
                         if raw_maes:
-                            # Natural log of MAE; guard against zero
                             raw_maes = np.asarray(raw_maes, dtype=float)
                             ln_maes = np.log(raw_maes + 1e-18)
 
@@ -1059,7 +1094,6 @@ if __name__ == '__main__':
                             plt.savefig(hist_path, dpi=150)
                             print(f"[hist] Saved histogram → {hist_path}")
 
-                            # Optional: also write a CSV of (rseed, MAE, lnMAE) for debugging
                             hist_df = pd.DataFrame({
                                 "rseed": rseed_list[:len(raw_maes)],
                                 "MAE": raw_maes,
@@ -1077,6 +1111,7 @@ if __name__ == '__main__':
             )
             combo.to_csv(combo_path, index=False)
             print(f"Saved combined do_predictions scores → {combo_path}")
+#endregion
 
 #region official run
     elif official_run:
@@ -1130,7 +1165,7 @@ if __name__ == '__main__':
                     steps=steps,
                     dt=dt,
                     N=N,
-                    qubit=(qubit if not ignore_qubit else 0),
+                    qubit=qubit,
                     history_values=None,
                     washout=washout,
                     batch_size=training_depth,
@@ -1281,9 +1316,9 @@ if __name__ == '__main__':
 
                 # label ensemble members only once to avoid legend spam
                 label_once = True
-                for ipreds in all_preds:
+                for i, ipreds in enumerate(all_preds):
                     ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9,
-                            label="ESN members" if label_once else None)
+                            label=f"ESN members {i}")
                     label_once = False
 
                 ax.set_xlim(65, 86)
