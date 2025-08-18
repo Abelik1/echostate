@@ -747,15 +747,15 @@ if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
     N_list         = [5]
-    train_seed     = 3141
+    train_seed     = 314
     reservoir_seed  = 314
     pred_seed     = 3141
-    qubit_list     = [0,1,2,3,4]       # list of qubit indices
+    qubit_list     = [0]       # list of qubit indices
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
     training_depth = 1000 # Number of time series used to train 1 ESN
-    testing_depth  = 1 # Number of ESNs trained
+    testing_depth  = 1000 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
     do_tune        = False  # run Optuna tuning
