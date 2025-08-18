@@ -351,6 +351,7 @@ class ESN(torch.nn.Module):
             ).to(device)
 
             model.fit(X_tensor, Y_tensor)
+            print("PREDICTING...")
             _, metrics = model.predict(input_list[:10], target_list[:10])
 
             LOGGER.info("Trial result",

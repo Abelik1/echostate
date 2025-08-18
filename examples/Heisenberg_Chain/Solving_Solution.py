@@ -746,7 +746,7 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [6]
+    N_list         = [5]
     train_seed     = 314
     reservoir_seed  = 314
     pred_seed     = 314
