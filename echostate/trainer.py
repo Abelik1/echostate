@@ -4,7 +4,14 @@ import torch
 import time
 
 LOGGER = logging.getLogger(__name__)
-
+def _fmt_tensor(name, t):
+    if t is None:
+        return f"{name}: None"
+    if not isinstance(t, torch.Tensor):
+        return f"{name}: (not a tensor) {type(t)}"
+    pinned = getattr(t, "is_pinned", lambda: False)()
+    return (f"{name}: shape={tuple(t.shape)}, dtype={t.dtype}, device={t.device}, "
+            f"pinned={pinned}, requires_grad={t.requires_grad}")
 class Trainer:
     def __init__(self, ridge_param: float = 1e-6,
                  learning_algo: str = 'inv',

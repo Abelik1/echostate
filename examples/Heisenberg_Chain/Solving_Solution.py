@@ -17,9 +17,10 @@ warnings.filterwarnings(
     message=".*weights_only=False.*",
     category=FutureWarning
 )
-
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 # device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-device = torch.device('cpu') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
 print(f"Using device: {device}")
 # print(torch.__version__)
@@ -754,7 +755,7 @@ if __name__ == '__main__':
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
-    training_depth = 1000 # Number of time series used to train 1 ESN
+    training_depth = 3000 # Number of time series used to train 1 ESN
     testing_depth  = 1 # Number of ESNs trained
 
     # Modes: set exactly one of these to True

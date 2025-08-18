@@ -199,6 +199,8 @@ class ESN(torch.nn.Module):
             ev0.record()
 
         # ----- main time loop -----
+        Xbuf = [] ; Ybuf = []
+        K = 128
         for t in range(T):
             u_base = X[:, t, :]
             u = torch.cat([u_base, prev_fb], dim=1) if self.feedback > 0 else u_base
@@ -210,8 +212,16 @@ class ESN(torch.nn.Module):
                 xb = torch.cat([x, bias_vec], dim=1)    # (B, R+1)
                 yt = Y[:, t, :]                         # (B, Dout)
 
-                xTx += xb.mT @ xb                       # (R+1, R+1)
-                xTy += xb.mT @ yt                       # (R+1, Dout)
+                Xbuf.append(xb)
+                Ybuf.append(yt)
+                if len(Xbuf) == K or t == T-1:
+                    Xstk = torch.cat(Xbuf, dim=0)        # (B*K, R+1)
+                    Ystk = torch.cat(Ybuf, dim=0)        # (B*K, Dout)
+                    xTx += Xstk.mT @ Xstk
+                    xTy += Xstk.mT @ Ystk
+                    Xbuf.clear(); Ybuf.clear()
+                # xTx += xb.mT @ xb                       # (R+1, R+1)
+                # xTy += xb.mT @ yt                       # (R+1, Dout)
 
                 # running stats
                 bsz = x.shape[0]
@@ -219,7 +229,7 @@ class ESN(torch.nn.Module):
                 delta = x.mean(dim=0) - run_mean
                 run_mean += (bsz / max(diag_count, 1)) * delta
                 run_m2 += ((x - run_mean).pow(2)).sum(dim=0)
-
+            
             if self.feedback > 0:
                 prev_fb = torch.cat([prev_fb[:, self.output_dim:], Y[:, t, :]], dim=1)
 

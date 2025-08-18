@@ -34,10 +34,11 @@ class Reservoir:
         self.W_bias = torch.empty(reservoir_size, 1, device=self.device)
         self.W_bias.uniform_(-bias_scaling, bias_scaling)
         self._W_bias = self.W_bias.squeeze()  # shape (reservoir_size,)
-
+        self.use_amp = True
         # reservoir recurrent weights on CPU for eigen-decomp
         W = self._initialize_reservoir(reservoir_size, spectral_radius, sparsity)
         self.W = W.to(self.device)
+        self.W_csr = W.to_sparse_csr().to(self.device) 
         # print(device)
         LOGGER.debug(
             "Reservoir init",
@@ -89,8 +90,17 @@ class Reservoir:
         if u.dim() == 1:
             u = u.unsqueeze(0)
 
-        pre = u @ self.W_in.T + x @ self.W.T + self._W_bias  # (B, R)
-        x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
+        
+        if self.use_amp and x.is_cuda:
+            # AMP for reservoir math only
+            with torch.cuda.amp.autocast(dtype=torch.float16):
+                pre = torch.addmm(u @ self.W_in.T + self._W_bias, x, self.W.mT)  # (B,R)
+                x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
+        else:
+            pre = torch.addmm(u @ self.W_in.T + self._W_bias, x, self.W.mT)
+            x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
+            
+        # x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
 
         # Ultra-verbose per-step logging (guarded by TRACE)
         if LOGGER.isEnabledFor(5):  # TRACE
