@@ -6,6 +6,7 @@ import torch
 from echostate import ESN  # <-- our new ESN module
 from echostate.utils import mean_absolute_error
 from .Heisenberg_sim import HeisenbergChain
+from .heisen_utils import *
 import matplotlib.pyplot as plt
 from qutip import Qobj, sigmaz, expect
 import pandas as pd
@@ -31,8 +32,24 @@ print(f"Using device: {device}")
 #     print(f"GPU name: {torch.cuda.get_device_name(0)}")
 #     print(f"Memory usage: {torch.cuda.memory_allocated() / 1e6:.2f} MB")
 
+from torch.serialization import add_safe_globals
+from echostate import ESN  # your ESN class
+
 
 # ---------- Small, focused utilities (behavior-preserving) ----------
+def _safe_get_config(model):
+    """Return a config dict even for legacy pickled ESNs that lacked get_config/seed."""
+    # Preferred: modern API
+    if hasattr(model, "get_config"):
+        try:
+            cfg = model.get_config()
+            # ensure plain str for device
+            if "device" in cfg and not isinstance(cfg["device"], str):
+                cfg["device"] = str(cfg["device"])
+            return cfg
+        except Exception:
+            pass
+        
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
     return path
@@ -114,6 +131,74 @@ def extract_rseed_from_filename(path: str):
                 return None
     return None
 
+def save_esn(model, path, extra=None):
+    sd = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+    if getattr(model, "W_out", None) is not None and "W_out" not in sd:
+        sd["W_out"] = model.W_out.detach().cpu()
+    payload = {"state_dict": sd, "config": _safe_get_config(model), "extra": extra or {}}
+    torch.save(payload, path)  # ← remove pickle_protocol=5
+    # (PyTorch defaults to protocol 2, which the safe loader understands)
+    
+def _install_W_out(esn, W):
+    if isinstance(getattr(esn, "W_out", None), torch.Tensor) and esn.W_out.numel() > 0:
+        # if shape mismatch, re-register
+        if esn.W_out.shape != W.shape:
+            try:
+                delattr(esn, "W_out")
+            except Exception:
+                pass
+            try:
+                esn.register_buffer("W_out", W)
+            except Exception:
+                esn.W_out = W
+        else:
+            esn.W_out.data.copy_(W)
+    else:
+        # no usable buffer yet → register
+        try:
+            if hasattr(esn, "W_out"):
+                delattr(esn, "W_out")
+            esn.register_buffer("W_out", W)
+        except Exception:
+            esn.W_out = W
+
+def load_esn(path, device="cpu", *, migrate_old=True):
+    obj = torch.load(path, map_location="cpu")  # no weights_only
+    if not (isinstance(obj, dict) and "state_dict" in obj and "config" in obj):
+        raise ValueError(f"Unsupported ESN file format at {path}")
+
+    cfg = obj["config"]
+    sd  = obj["state_dict"]
+
+    esn = ESN(**cfg)
+
+    # First try to load everything (now that W_out placeholder exists, strict can be True)
+    missing, unexpected = esn.load_state_dict(sd, strict=False)  # keep False to be lenient across versions
+
+    # If W_out didn't get loaded (older payloads or name mismatch), install manually
+    if ("W_out" in sd) and (not isinstance(esn.W_out, torch.Tensor) or esn.W_out.numel() == 0):
+        W = sd["W_out"]
+        # Ensure shape is (Dout, R+1)
+        expected = (esn.output_dim, esn.reservoir_size + 1)
+        if W.shape == expected:
+            _install_W_out(esn, W)
+        elif W.T.shape == expected:
+            _install_W_out(esn, W.T)
+        else:
+            raise RuntimeError(f"W_out shape {tuple(W.shape)} incompatible with expected {expected}")
+
+    # Final safety net: assert W_out is a non-empty tensor
+    if not (isinstance(esn.W_out, torch.Tensor) and esn.W_out.numel() > 0):
+        raise RuntimeError("Loaded ESN has no trained W_out. Was the model saved after fit()?")
+
+    return esn.to(device).eval()
+
+from safetensors.torch import load_file
+def load_esn_st(path, config_json, device="cpu"):
+    state = load_file(path)  # dict[str, Tensor] on CPU
+    esn = ESN(**config_json)
+    esn.load_state_dict(state, strict=True)
+    return esn.to(device).eval()
 #region ESNPredictor
 class ESNPredictor:
     """
@@ -258,58 +343,7 @@ class ESNPredictor:
         return preds, true
 
 
-#region Physical TESTS
-def summarize(arr):
-    arr = np.asarray(arr)
-    return {
-        "mean": float(arr.mean()),
-        "std": float(arr.std()),
-        "min": float(arr.min()),
-        "max": float(arr.max())
-    }
 
-def check_bounds(z_pred, eps=1e-6):
-    z_pred = np.asarray(z_pred)
-    violations = np.where(np.abs(z_pred) > 1 + eps)[0]
-    max_excess = float((np.abs(z_pred) - 1).clip(min=0).max()) if violations.size else 0.0
-    return {
-        "num_violations": int(violations.size),
-        "violation_indices_sample": violations[:10].tolist(),
-        "max_excess_over_1": max_excess
-    }
-
-def autocorr_lag1(x):
-    x = np.asarray(x)
-    x = x - x.mean()
-    if len(x) < 2 or x.std() == 0: return 0.0
-    return float(np.correlate(x[:-1], x[1:])[0] / ((len(x)-1)*x.std()*x.std()))
-
-def magnetization_from_qubit_series(z_per_qubit, t_len=None):
-    """
-    z_per_qubit: dict {q: np.array(seq_len)} for same timeline (after washout alignment if needed).
-    returns: Mz(t) array
-    """
-    qs = sorted(z_per_qubit.keys())
-    Z = np.stack([z_per_qubit[q][:t_len] for q in qs], axis=0)  # (Q, T)
-    return Z.sum(axis=0)
-
-def drift_stats(series):
-    """How constant is a series? report mean abs diff and slope via linear fit."""
-    y = np.asarray(series)
-    diffs = np.abs(np.diff(y))
-    # simple slope
-    t = np.arange(len(y))
-    slope = float(np.polyfit(t, y, 1)[0]) if len(y) >= 2 else 0.0
-    return {"mean_abs_step": float(diffs.mean() if len(diffs) else 0.0), "linear_slope": slope}
-
-def compare_series(y_pred, y_true):
-    y_pred = np.asarray(y_pred)
-    y_true = np.asarray(y_true)
-    T = min(len(y_pred), len(y_true))
-    y_pred = y_pred[:T]; y_true = y_true[:T]
-    mae = mean_absolute_error(torch.tensor(y_pred), torch.tensor(y_true)).item()
-    rmse = float(np.sqrt(np.mean((y_pred - y_true)**2)))
-    return {"mae": float(mae), "rmse": rmse}
 
 
 # -------------Example CASE------------------------------------------
@@ -435,394 +469,6 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
 
     return study
 
-def render_physics_report(json_path="./examples/Heisenberg_Chain/cache/physics_summary.json",
-                          out_dir=None,
-                          show=True):
-    """
-    Read physics_summary.json and produce a compact visual report:
-      - Per-(N,qubit) ESN MAE/RMSE
-      - Bounds violations (|<σz>|>1)
-      - Simulator norm & energy drift summaries
-      - Purity statistics
-      - Global magnetization summaries (if present)
-
-    Creates a multi-page PDF and a few PNGs in out_dir, and prints a concise text summary.
-    """
-    import os, json, math
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-
-    if out_dir is None:
-        out_dir = os.path.dirname(os.path.abspath(json_path)) or "."
-    os.makedirs(out_dir, exist_ok=True)
-
-    # ---------- Load ----------
-    with open(json_path, "r") as f:
-        rows = json.load(f)
-
-    # ---------- Buckets ----------
-    # per-qubit ESN diag
-    esn_rows = []   # dicts with keys: N, qubit, series_error{mae,rmse}, pred_bounds{num_violations,...}, summaries, acf1...
-    # simulator per-qubit diag
-    sim_rows = []   # dicts inside {"simulator_checks": {...}}
-    # global magnetization rows
-    mag_rows = []   # dicts inside {"global_magnetization": {...}}
-
-    for item in rows:
-        if "simulator_checks" in item:
-            sim_rows.append(item["simulator_checks"])
-        elif "global_magnetization" in item:
-            mag = item["global_magnetization"]
-            # inject N if missing
-            if "N" not in mag:
-                mag["N"] = None
-            mag_rows.append(mag)
-        else:
-            # assume per-qubit ESN diag shape
-            # require minimal keys to count it as ESN diag
-            if all(k in item for k in ["N", "qubit", "series_error", "pred_bounds"]):
-                esn_rows.append(item)
-
-    # helper to tag
-    def tag(n, q):
-        return f"N{n}_q{q}"
-
-    # ---------- Aggregate helpers ----------
-    def collect_esn_metric(name):
-        xs, vals = [], []
-        for r in esn_rows:
-            xs.append(tag(r["N"], r["qubit"]))
-            vals.append(float(r["series_error"].get(name, np.nan)))
-        return xs, np.array(vals)
-
-    def collect_bounds():
-        xs, cnts, max_exc = [], [], []
-        for r in esn_rows:
-            xs.append(tag(r["N"], r["qubit"]))
-            pb = r.get("pred_bounds", {})
-            cnts.append(int(pb.get("num_violations", 0)))
-            max_exc.append(float(pb.get("max_excess_over_1", 0.0)))
-        return xs, np.array(cnts), np.array(max_exc)
-
-    def collect_sim_drift(key="energy_drift", sub="linear_slope"):
-        xs, vals = [], []
-        for r in sim_rows:
-            xs.append(tag(r["N"], r["qubit"]))
-            vals.append(abs(float(r.get(key, {}).get(sub, 0.0))))
-        return xs, np.array(vals)
-
-    def collect_purity(summary_stat="mean"):
-        xs, vals = [], []
-        for r in sim_rows:
-            xs.append(tag(r["N"], r["qubit"]))
-            vals.append(float(r.get("purity_summary", {}).get(summary_stat, np.nan)))
-        return xs, np.array(vals)
-
-    # ---------- Prepare data ----------
-    x_mae_labels, mae_vals = collect_esn_metric("mae")
-    _, rmse_vals = collect_esn_metric("rmse")
-    x_bounds_labels, bound_cnts, bound_maxexc = collect_bounds()
-    x_energy_labels, energy_slope = collect_sim_drift("energy_drift", "linear_slope")
-    x_norm_labels, norm_step = collect_sim_drift("norm_drift", "mean_abs_step")
-    x_purity_mean, purity_mean = collect_purity("mean")
-    _, purity_std = collect_purity("std")
-    _, purity_min = collect_purity("min")
-    _, purity_max = collect_purity("max")
-
-    # ---------- Plotting ----------
-    pdf_path = os.path.join(out_dir, "physics_summary_report.pdf")
-    with PdfPages(pdf_path) as pdf:
-        # 1) ESN error bars
-        fig, ax = plt.subplots(figsize=(10, 4))
-        idx = np.arange(len(x_mae_labels))
-        ax.bar(idx - 0.2, mae_vals, width=0.4, label="MAE")
-        ax.bar(idx + 0.2, rmse_vals, width=0.4, label="RMSE")
-        ax.set_xticks(idx)
-        ax.set_xticklabels(x_mae_labels, rotation=45, ha="right")
-        ax.set_title("ESN Prediction Error per (N, qubit)")
-        ax.set_ylabel("Error")
-        ax.legend()
-        fig.tight_layout()
-        pdf.savefig(fig); fig.savefig(os.path.join(out_dir, "plot_esn_errors.png")); plt.close(fig)
-
-        # 2) Bounds violations
-        fig, ax = plt.subplots(figsize=(10, 4))
-        idx = np.arange(len(x_bounds_labels))
-        ax.bar(idx, bound_cnts, label="#(|⟨σz⟩|>1)")
-        ax.plot(idx, bound_maxexc, marker="o", linestyle="--", label="Max excess over 1")
-        ax.set_xticks(idx)
-        ax.set_xticklabels(x_bounds_labels, rotation=45, ha="right")
-        ax.set_title("ESN Physical Bounds Checks")
-        ax.set_ylabel("Count / Excess")
-        ax.legend()
-        fig.tight_layout()
-        pdf.savefig(fig); fig.savefig(os.path.join(out_dir, "plot_bounds.png")); plt.close(fig)
-
-        # 3) Simulator drifts (energy & norm)
-        fig, ax = plt.subplots(figsize=(10, 4))
-        idxE = np.arange(len(x_energy_labels))
-        ax.bar(idxE - 0.2, energy_slope, width=0.4, label="|Energy slope|")
-        idxN = np.arange(len(x_norm_labels))
-        ax.bar(idxN + 0.2, norm_step, width=0.4, label="Mean |Δ Norm|")
-        xticks = list(dict.fromkeys(x_energy_labels + x_norm_labels))  # preserve order and uniqueness
-        ax.set_xticks(np.arange(len(xticks)))
-        ax.set_xticklabels(xticks, rotation=45, ha="right")
-        ax.set_title("Simulator Unitarity Checks")
-        ax.set_ylabel("Drift")
-        ax.legend()
-        fig.tight_layout()
-        pdf.savefig(fig); fig.savefig(os.path.join(out_dir, "plot_drift.png")); plt.close(fig)
-
-        # 4) Purity summary (mean ± range)
-        fig, ax = plt.subplots(figsize=(10, 4))
-        idx = np.arange(len(x_purity_mean))
-        ax.bar(idx, purity_mean, width=0.5, label="Purity mean")
-        # error bars as min/max whiskers
-        err_low = purity_mean - purity_min
-        err_high = purity_max - purity_mean
-        ax.errorbar(idx, purity_mean, yerr=[err_low, err_high], fmt="none", capsize=4, label="Range (min–max)")
-        ax.set_xticks(idx)
-        ax.set_xticklabels(x_purity_mean, rotation=45, ha="right")
-        ax.set_title("Single-Qubit Purity (from simulator ρ_k)")
-        ax.set_ylabel("Tr(ρ²)")
-        ax.set_ylim(0.45, 1.05)
-        ax.legend()
-        fig.tight_layout()
-        pdf.savefig(fig); fig.savefig(os.path.join(out_dir, "plot_purity.png")); plt.close(fig)
-
-        # 5) Global magnetization summaries (if present)
-        if mag_rows:
-            # One page per N (or once if N is None)
-            Ns = sorted(set(m.get("N") for m in mag_rows))
-            for n in Ns:
-                mags = [m for m in mag_rows if m.get("N") == n]
-                # take first (they're summaries)
-                m = mags[0]
-                def fmt_summary(prefix, d):
-                    return f"{prefix} mean={d.get('mean', 'NA'):.4g}, std={d.get('std','NA'):.4g}, slope={m.get(prefix+'_drift',{}).get('linear_slope',0):.3e}"
-                fig, ax = plt.subplots(figsize=(8, 3))
-                parts = []
-                if "mag_true_summary" in m:
-                    parts.append(fmt_summary("mag_true", m["mag_true_summary"]))
-                if "mag_pred_summary" in m:
-                    parts.append(fmt_summary("mag_pred", m["mag_pred_summary"]))
-                if "mag_series_error" in m:
-                    parts.append(f"MAE={m['mag_series_error'].get('mae',np.nan):.4g}, RMSE={m['mag_series_error'].get('rmse',np.nan):.4g}")
-                text = "\n".join(parts) if parts else "No magnetization summary found."
-                ax.axis("off")
-                ax.set_title(f"Global Magnetization Summary (N={n})")
-                ax.text(0.02, 0.5, text, va="center", ha="left", family="monospace")
-                fig.tight_layout()
-                pdf.savefig(fig); fig.savefig(os.path.join(out_dir, f"mag_summary_N{n}.png")); plt.close(fig)
-
-    # ---------- Console summary ----------
-    def topk(labels, values, k=5, reverse=False):
-        order = np.argsort(values)
-        if reverse:
-            order = order[::-1]
-        order = order[:k]
-        return [(labels[i], float(values[i])) for i in order]
-
-    print("\n=== Physics Report ===")
-    if len(mae_vals):
-        worst_mae = topk(x_mae_labels, mae_vals, k=min(5, len(mae_vals)), reverse=True)
-        print("Worst MAE (top 5):")
-        for lbl, val in worst_mae:
-            print(f"  {lbl}: {val:.4g}")
-    if len(bound_cnts) and bound_cnts.sum() > 0:
-        offenders = [(x_bounds_labels[i], int(bound_cnts[i])) for i in np.where(bound_cnts>0)[0]]
-        print("Bounds violations (|<σz⟩| > 1):")
-        for lbl, cnt in offenders:
-            print(f"  {lbl}: {cnt}")
-    if len(energy_slope):
-        worst_energy = topk(x_energy_labels, energy_slope, k=min(5, len(energy_slope)), reverse=True)
-        print("Largest |energy slope| (top 5):")
-        for lbl, val in worst_energy:
-            print(f"  {lbl}: {val:.3e}")
-    if len(norm_step):
-        worst_norm = topk(x_norm_labels, norm_step, k=min(5, len(norm_step)), reverse=True)
-        print("Largest mean |Δ norm| (top 5):")
-        for lbl, val in worst_norm:
-            print(f"  {lbl}: {val:.3e}")
-
-    print(f"\nSaved report PDF → {pdf_path}")
-    print(f"PNGs saved in     → {out_dir}")
-
-    if show:
-        # Open the last PNG (arbitrary) to pop a window in interactive sessions
-        try:
-            import webbrowser
-            webbrowser.open_new(pdf_path)
-        except Exception:
-            pass
-
-import json
-from pathlib import Path
-from typing import Union, Dict, Any, List
-
-def scorecard_physics(summary_json: Union[str, Path, Dict, List],
-                      *,
-                      # ---- thresholds you can tweak ----
-                      norm_std_tol=1e-12,
-                      norm_slope_tol=1e-15,
-                      energy_std_tol=1e-10,
-                      energy_slope_tol=1e-12,
-                      purity_min_floor=0.0,
-                      purity_max_ceiling=1.0,
-                      mae_ok=0.03, mae_warn=0.08,
-                      rmse_ok=0.04, rmse_warn=0.10,
-                      acf_diff_ok=0.01, acf_diff_warn=0.03,
-                      mag_slope_tol=5e-6,
-                      quiet=False) -> Dict[str, Any]:
-    """
-    Read a physics_summary.json (either a path or an already-loaded list/dict)
-    and print a concise scorecard, returning a structured summary.
-
-    Status semantics:
-      ✅ = pass (green)   | ⚠️ = caution (yellow) | ❌ = fail (red)
-
-    Thresholds are defaults you can tune to your system’s scale.
-    """
-    def _status(ok: bool=None, warn: bool=False):
-        if ok is True:  return "✅"
-        if warn:        return "⚠️"
-        return "❌"
-
-    # Load JSON
-    if isinstance(summary_json, (str, Path)):
-        data = json.loads(Path(summary_json).read_text())
-    else:
-        data = summary_json
-
-    # Normalize list of blocks
-    if isinstance(data, dict):
-        blocks = [data]
-    else:
-        blocks = list(data)
-
-    # Extract blocks by type
-    sim_checks = [b["simulator_checks"] for b in blocks if "simulator_checks" in b]
-    mag_block  = next((b["global_magnetization"] for b in blocks if "global_magnetization" in b), None)
-    qubit_series = [b for b in blocks if all(k in b for k in ("qubit","pred_summary","true_summary","series_error","acf1_pred","acf1_true","pred_bounds"))]
-
-    report = {"simulator": {}, "qubits": {}, "magnetization": {}, "overall": {"ok": True, "notes": []}}
-
-    # ---------- Simulator checks per qubit ----------
-    for sc in sim_checks:
-        q = sc["qubit"]
-        ns = sc["norm_summary"]
-        es = sc["energy_summary"]
-        nd = sc["norm_drift"]
-        ed = sc["energy_drift"]
-        ps = sc.get("purity_summary", {})
-        # Norm
-        norm_ok  = (ns["std"] <= norm_std_tol) and (abs(nd["linear_slope"]) <= norm_slope_tol)
-        norm_warn = (ns["std"] <= 10*norm_std_tol) and (abs(nd["linear_slope"]) <= 10*norm_slope_tol)
-        # Energy
-        en_ok  = (es["std"] <= energy_std_tol) and (abs(ed["linear_slope"]) <= energy_slope_tol)
-        en_warn = (es["std"] <= 10*energy_std_tol) and (abs(ed["linear_slope"]) <= 10*energy_slope_tol)
-        # Purity in range
-        purity_ok = (ps.get("min", 0.0) >= purity_min_floor - 1e-9) and (ps.get("max", 1.0) <= purity_max_ceiling + 1e-9)
-
-        report["simulator"][q] = {
-            "norm":   {"status": _status(ok=norm_ok, warn=norm_warn), "std": ns["std"], "slope": nd["linear_slope"]},
-            "energy": {"status": _status(ok=en_ok, warn=en_warn), "std": es["std"], "slope": ed["linear_slope"]},
-            "purity": {"status": _status(ok=purity_ok), "mean": ps.get("mean"), "min": ps.get("min"), "max": ps.get("max")},
-        }
-
-    # ---------- Per-qubit ESN series ----------
-    for qb in qubit_series:
-        q = qb["qubit"]
-        mae  = qb["series_error"]["mae"]
-        rmse = qb["series_error"]["rmse"]
-        acf_diff = abs(qb["acf1_pred"] - qb["acf1_true"])
-        bounds_ok = (qb["pred_bounds"]["num_violations"] == 0)
-
-        # MAE / RMSE grading
-        mae_status  = _status(ok=(mae <= mae_ok),  warn=(mae_ok < mae <= mae_warn))
-        rmse_status = _status(ok=(rmse <= rmse_ok), warn=(rmse_ok < rmse <= rmse_warn))
-        acf_status  = _status(ok=(acf_diff <= acf_diff_ok), warn=(acf_diff_ok < acf_diff <= acf_diff_warn))
-        bounds_status = _status(ok=bounds_ok)
-
-        report["qubits"][q] = {
-            "mae":  {"status": mae_status,  "value": mae},
-            "rmse": {"status": rmse_status, "value": rmse},
-            "acf1_diff": {"status": acf_status, "value": acf_diff},
-            "bounds": {"status": bounds_status, "violations": qb["pred_bounds"]["num_violations"]},
-            "pred_summary": qb["pred_summary"],
-            "true_summary": qb["true_summary"],
-        }
-
-    # ---------- Global magnetization ----------
-    if mag_block:
-        mtrue = mag_block["mag_true_summary"]
-        mpred = mag_block["mag_pred_summary"]
-        mte   = mag_block["mag_true_drift"]["linear_slope"]
-        mpe   = mag_block["mag_pred_drift"]["linear_slope"]
-        m_mae = mag_block["mag_series_error"]["mae"]
-        m_rmse= mag_block["mag_series_error"]["rmse"]
-
-        drift_ok = (abs(mte) <= mag_slope_tol and abs(mpe) <= mag_slope_tol)
-        report["magnetization"] = {
-            "drift": {"status": _status(ok=drift_ok, warn=abs(mte)<=10*mag_slope_tol and abs(mpe)<=10*mag_slope_tol),
-                      "true_slope": mte, "pred_slope": mpe},
-            "error": {
-                "mae":  {"status": _status(ok=(m_mae<=mae_ok),  warn=(mae_ok<m_mae<=mae_warn)),  "value": m_mae},
-                "rmse": {"status": _status(ok=(m_rmse<=rmse_ok), warn=(rmse_ok<m_rmse<=rmse_warn)), "value": m_rmse},
-            },
-            "true_summary": mtrue, "pred_summary": mpred,
-        }
-
-    # ---------- Print summary ----------
-    if not quiet:
-        print("\n=== Physics Summary Scorecard ===")
-        # Simulator
-        print("\n-- Simulator checks (per qubit) --")
-        for q in sorted(report["simulator"].keys()):
-            s = report["simulator"][q]
-            print(f"Qubit {q}: "
-                  f"Norm {s['norm']['status']} (std={s['norm']['std']:.2e}, slope={s['norm']['slope']:.2e}) | "
-                  f"Energy {s['energy']['status']} (std={s['energy']['std']:.2e}, slope={s['energy']['slope']:.2e}) | "
-                  f"Purity {s['purity']['status']} (mean={s['purity']['mean']:.3f}, "
-                  f"range=[{s['purity']['min']:.3f},{s['purity']['max']:.3f}])")
-
-        # Qubit series
-        print("\n-- ESN predictions vs. truth (per qubit) --")
-        for q in sorted(report["qubits"].keys()):
-            s = report["qubits"][q]
-            print(f"Qubit {q}: "
-                  f"MAE {s['mae']['status']}={s['mae']['value']:.4f} | "
-                  f"RMSE {s['rmse']['status']}={s['rmse']['value']:.4f} | "
-                  f"ACFΔ {s['acf1_diff']['status']}={s['acf1_diff']['value']:.4f} | "
-                  f"Bounds {s['bounds']['status']} (violations={s['bounds']['violations']})")
-
-        # Magnetization
-        if report["magnetization"]:
-            m = report["magnetization"]
-            print("\n-- Global magnetization --")
-            print(f"Drift {m['drift']['status']} (true slope={m['drift']['true_slope']:.2e}, "
-                  f"pred slope={m['drift']['pred_slope']:.2e}) | "
-                  f"MAE {m['error']['mae']['status']}={m['error']['mae']['value']:.4f} | "
-                  f"RMSE {m['error']['rmse']['status']}={m['error']['rmse']['value']:.4f}")
-
-        print("\nLegend: ✅ pass | ⚠️ caution | ❌ fail\n")
-
-    # Overall ok?
-    any_fail = False
-    for section in ("simulator","qubits","magnetization"):
-        sec = report.get(section, {})
-        if isinstance(sec, dict):
-            for _, v in sec.items():
-                if isinstance(v, dict):
-                    # look for nested 'status'
-                    for vv in v.values() if "status" not in v else [v]:
-                        if isinstance(vv, dict) and "status" in vv and vv["status"] == "❌":
-                            any_fail = True
-                elif "status" in v and v["status"] == "❌":
-                    any_fail = True
-    report["overall"]["ok"] = not any_fail
-    return report
 
 # Example usage:
 # scorecard_physics("physics_summary.json")
@@ -842,7 +488,7 @@ if __name__ == '__main__':
     dt             = 0.2
     acc_dt         = 0.05
     train_batch_size = 1000 # Number of time series used to train 1 ESN
-    test_esns  = 6 # Number of ESNs trained
+    test_esns  = 3 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
     do_tune        = False  # run Optuna tuning
@@ -858,7 +504,7 @@ if __name__ == '__main__':
     n_trials   = 500
     num_pred      = 30 # Number of final test series
     # Plot filtering (set to None to disable filtering)
-    PLOT_MAE_TOL = 0.06   # e.g., only plot ESNs with MAE <= 0.002
+    PLOT_MAE_TOL = 0.03   # e.g., only plot ESNs with MAE <= 0.002
     USE_TOL_FOR_STATS = True # if True, mean/std shading uses only filtered ESNs
 
     # ---------- Names & Paths (centralized control block) ----------
@@ -876,8 +522,6 @@ if __name__ == '__main__':
     STEP_LOG_EVERY = 50           # log ESN step stats every N steps
     SILENCE_3P = True             # silence matplotlib/PIL/optuna/etc. at WARNING
 
-    import logging
-    from echostate.logging_config import setup_logging
 
     fmt_dt_val = format_dt_val(dt)
     run_name = (
@@ -1028,8 +672,7 @@ if __name__ == '__main__':
 
                 if os.path.exists(model_path):
                     print(f"Loading ESN from {model_path}")
-                    esn_single = torch.load(model_path, weights_only=False)
-                    esn_single.to(device).eval()
+                    esn_single = load_esn(model_path, device=device)
                 else:
                     raise FileNotFoundError(
                         f"Expected trained ESN not found:\n  {model_path}\n"
@@ -1170,8 +813,7 @@ if __name__ == '__main__':
 
                         for pth in esn_paths:
                             try:
-                                esn_i = torch.load(pth, weights_only=False)
-                                esn_i.to(device).eval()
+                                esn_i = load_esn(pth, device=device)
                                 pred_i, true_i = predictor_model.predict_sequence(esn_i, z0_eval)
                                 mae_i = mean_absolute_error(torch.tensor(pred_i), torch.tensor(true_i)).item()
                                 raw_maes.append(mae_i)
@@ -1320,12 +962,11 @@ if __name__ == '__main__':
                     if os.path.exists(model_path):
                         print(f"Loading existing ESN Ex{i} (seed={rseed})")
                         logger.info("Loading existing ESN", extra={"extra": {"ex": i, "seed": rseed, "model_path": model_path}})
-                        esn = torch.load(model_path, weights_only=False)
-                        esn.to(device).eval()
+                        esn = load_esn(model_path, device=device)
                     else:
                         logger.info("Training ESN", extra={"extra": {"ex": i, "seed": rseed}})
                         predictor.train_esn(esn)
-                        torch.save(esn, model_path)
+                        save_esn(esn, model_path)
                         logger.info("Saved trained ESN", extra={"extra": {"model_path": model_path}})
 
                     # Log the params you ACTUALLY used (not the old defaults)
@@ -1344,7 +985,8 @@ if __name__ == '__main__':
                     pred, true = predictor.predict_sequence(esn, z_eval)
 
                     # trainer diagnostics (behavior preserved)
-                    esn.trainer.debug_covariance()
+                    if esn.trainer.xTx is not None:
+                        esn.trainer.debug_covariance()
                     stats = esn.trainer.covariance_stats()
                     print(stats)
 

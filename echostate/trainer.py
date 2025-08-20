@@ -230,11 +230,15 @@ class Trainer:
             print(_fmt_tensor("W_out", W))
         return W
 
-    def debug_covariance(self): 
-        s = torch.linalg.svdvals(self.xTx) 
-        tol = s.max() * max(self.xTx.shape) * torch.finfo(s.dtype).eps 
-        rank = int((s > tol).sum().item()) 
-        cond = (s.max() / s.min()).item() 
+    def debug_covariance(self):
+        if self.xTx is None:
+            print("[DEBUG] covariance: None (no cached X^T X). "
+                "This is expected for freshly loaded models unless you saved trainer state.")
+            return
+        s = torch.linalg.svdvals(self.xTx)
+        tol = s.max() * max(self.xTx.shape) * torch.finfo(s.dtype).eps
+        rank = int((s > tol).sum().item())
+        cond = (s.max() / s.min()).item()
         print(f"[DEBUG] covariance shape: {tuple(self.xTx.shape)}, rank: {rank}, condition #: {cond:.2e}")
         
     def covariance_stats(self, safe: bool = False):

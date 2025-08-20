@@ -101,8 +101,10 @@ class ESN(torch.nn.Module):
         self.batch_size = batch_size
         self.learning_algo = learning_algo
         self.step_log_every = step_log_every
-        
+        self.seed = seed
         self.profile = profile or _env_profile_on()
+        self.sparsity = sparsity
+        self.spectral_radius = spectral_radius
         # components
         self.reservoir = Reservoir(
             input_dim=self.input_dim,
@@ -122,7 +124,8 @@ class ESN(torch.nn.Module):
             profile=self.profile, 
             
         )
-
+        if not hasattr(self, "W_out"):
+            self.register_buffer("W_out", torch.empty(0, device=self.device))
         # readout weights and buffers
         self.W_out = None
         self._batch_bias = None
@@ -140,7 +143,34 @@ class ESN(torch.nn.Module):
                 "learning_algo": learning_algo,
             }},
         )
+        
+    def get_config(self):
+        """Minimal info to rebuild the identical ESN architecture & reservoir."""
+        return dict(
+            device=str(self.device),  # string form; mapped on load
+            base_input_dim=self.base_input_dim,
+            reservoir_size=self.reservoir_size,
+            output_dim=self.output_dim,
+            feedback=self.feedback,
 
+            # prefer ESN's own copies, fall back to reservoir attrs, then sane defaults
+            spectral_radius=getattr(self, "spectral_radius",
+                                    getattr(self.reservoir, "spectral_radius", 0.9)),
+            sparsity=getattr(self, "sparsity",
+                            getattr(self.reservoir, "sparsity", 0.1)),
+
+            input_scaling=self.input_scaling,
+            bias_scaling=self.bias_scaling,
+            ridge_param=self.trainer.ridge_param,
+            learning_algo=self.learning_algo,
+            leak_rate=self.leak_rate,
+            washout=self.washout,
+            batch_size=self.batch_size,
+            seed=self.seed,
+            step_log_every=self.step_log_every,
+            profile=self.profile,
+        )
+        
     def _ensure_batch_bias(self, batch_sz: int) -> torch.Tensor:
         if self._batch_bias is None or self._batch_bias.shape[0] != batch_sz:
             self._batch_bias = torch.ones(batch_sz, 1, device=self.device) * self.bias_scaling
@@ -266,7 +296,21 @@ class ESN(torch.nn.Module):
         # Solve
         self.trainer._profile = prof_on  # inform trainer
         self.W_out = self.trainer.fit_from_cov(xTx, xTy, n_feat)
+        W = self.W_out.detach()
+        buffers = dict(self.named_buffers())
 
+        if "W_out" in buffers and isinstance(buffers["W_out"], torch.Tensor):
+            buffers["W_out"].data.copy_(W)
+        else:
+            try:
+                # remove placeholder attr if present
+                if hasattr(self, "W_out") and not isinstance(self.W_out, torch.Tensor):
+                    delattr(self, "W_out")
+                self.register_buffer("W_out", W)
+            except Exception:
+                # fallback: plain attr (save_esn() already injects W_out into payload)
+                self.W_out = W
+                
         if prof_on:
             print(_fmt_tensor("W_out", self.W_out))
             if prof: 
