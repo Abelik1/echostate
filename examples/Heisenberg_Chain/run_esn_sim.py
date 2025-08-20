@@ -330,7 +330,7 @@ class ESNPredictor:
         """Fit a provided ESN on the prepared dataset."""
         inputs, targets = self.build_dataset()
         print(f"Training ESN on {len(inputs)} sequences (washout={self.washout})")
-        esn.fit(inputs, targets, profile=True)
+        esn.fit(inputs, targets, profile=False)
 
     def predict_sequence(self, esn, z_test):
         """
@@ -488,12 +488,12 @@ if __name__ == '__main__':
     dt             = 0.2
     acc_dt         = 0.05
     train_batch_size = 1000 # Number of time series used to train 1 ESN
-    test_esns  = 3 # Number of ESNs trained
+    test_esns  = 50 # Number of ESNs trained
 
     # Modes: set exactly one of these to True
     do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
-    do_predictions = False
+    do_predictions = True
     official_run   = True   # run ensemble of ESNs & shaded plot
 
     learning_algo = "pinv" # inv / cholesky / solve / eigh / cg / svd / tsvd / qr / pinv
@@ -502,11 +502,12 @@ if __name__ == '__main__':
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
     n_trials   = 500
-    num_pred      = 30 # Number of final test series
+    num_pred   = 20 # Number of final test series
     # Plot filtering (set to None to disable filtering)
     PLOT_MAE_TOL = 0.03   # e.g., only plot ESNs with MAE <= 0.002
     USE_TOL_FOR_STATS = True # if True, mean/std shading uses only filtered ESNs
-
+    SKIP_PREDICTIONS_IF_HIST = True 
+    
     # ---------- Names & Paths (centralized control block) ----------
     # You can change folder names/roots here (loop-dependent names still built later)
     LOG_DIR   = "./logs"
@@ -643,6 +644,41 @@ if __name__ == '__main__':
                 # base_name used in model/fig paths
                 base_name = base_name_str(learning_algo, train_batch_size, qubit_tag, fmt_dt)
                 # =================================
+                
+                # ---- Fast-path: use cached histogram CSV if present (avoid ESN load) ----
+                hist_csv = os.path.join(model_dir, f"hist_logMAE_N{N}_q{qubit}_dataset0.csv")
+                if os.path.exists(hist_csv):
+                    print(f"[fast-path] Using existing histogram data → {hist_csv}")
+                    hist_df = pd.read_csv(hist_csv)
+
+                    # Prefer log10 if available; otherwise convert from natural log; otherwise compute from MAE.
+                    if "log10_MAE" in hist_df.columns:
+                        log_maes = hist_df["log10_MAE"].to_numpy(dtype=float)
+                    elif "ln_MAE" in hist_df.columns:
+                        log_maes = (hist_df["ln_MAE"].to_numpy(dtype=float)) / np.log(10.0)
+                    elif "MAE" in hist_df.columns:
+                        log_maes = np.log10(hist_df["MAE"].to_numpy(dtype=float) + 1e-18)
+                    else:
+                        log_maes = None
+                        print("[fast-path] CSV missing MAE columns; will fall back to ESN recompute.")
+
+                    if log_maes is not None:
+                        # Draw only once per column (final N row), same as original logic
+                        if row_idx == n_rows - 1:
+                            ax_hist = axs[n_rows][col_idx]
+                            ax_hist.hist(log_maes, bins='auto')
+                            ax_hist.set_xlabel("log10(MAE)")
+                            ax_hist.set_ylabel("Frequency")
+                            ax_hist.set_title(f"MAE dist — N={N}, q={qubit}")
+                            if PLOT_MAE_TOL is not None:
+                                ax_hist.axvline(np.log10(PLOT_MAE_TOL + 1e-18), linestyle='--')
+
+                        # If you only wanted the histogram, you can skip ESN work entirely:
+                        if SKIP_PREDICTIONS_IF_HIST:
+                            print("[fast-path] Histogram plotted from cache. Skipping ESN loading/predictions for this (N,q).")
+                            # Continue to next (N, qubit)
+                            continue
+                # -------------------------------------------------------------------------
 
                 # Load best params if available
                 best = load_best_params(param_dir, param_name, dt)
@@ -795,7 +831,7 @@ if __name__ == '__main__':
                 # ── Part B: histogram over ESNs with varying rseed (dataset 0 only) ──
                 pattern = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed*_{base_name}.pt")
                 esn_paths = sorted(glob(pattern))
-                
+
                 if not esn_paths:
                     print(f"[hist] No ESN files found for pattern: {pattern}")
                 else:
@@ -807,7 +843,6 @@ if __name__ == '__main__':
                         z0 = np.asarray(pred_histories[0])
                         z0_eval = select_series_for_qubit(z0, q_idx, N)
 
-                        ln_maes = []
                         raw_maes = []
                         rseed_list = []
 
@@ -820,33 +855,37 @@ if __name__ == '__main__':
                                 rseed_list.append(extract_rseed_from_filename(pth))
                             except Exception as e:
                                 print(f"[hist] Skipping {pth} due to error: {e}")
-                                
+
                         if raw_maes:
                             raw_maes = np.asarray(raw_maes, dtype=float)
+                            log10_maes = np.log10(raw_maes + 1e-18)
                             ln_maes = np.log(raw_maes + 1e-18)
 
                             # draw only once per column to avoid overwriting (pick the final N row)
                             if row_idx == n_rows - 1:
                                 ax_hist = axs[n_rows][col_idx]   # last row, same column
-                                ax_hist.hist(ln_maes, bins='auto')
-                                ax_hist.set_xlabel("ln(MAE)")
+                                ax_hist.hist(log10_maes, bins='auto')
+                                ax_hist.set_xlabel("log10(MAE)")
                                 ax_hist.set_ylabel("Frequency")
                                 ax_hist.set_title(f"MAE dist — N={N}, q={qubit}")
                                 if PLOT_MAE_TOL is not None:
-                                    ax_hist.axvline(np.log(PLOT_MAE_TOL + 1e-18), linestyle='--')
+                                    ax_hist.axvline(np.log10(PLOT_MAE_TOL + 1e-18), linestyle='--')
 
-                            hist_path = os.path.join(model_dir, f"hist_lnMAE_N{N}_q{qubit}_dataset0.png")
+                            hist_path = os.path.join(model_dir, f"hist_logMAE_N{N}_q{qubit}_dataset0.png")
                             fig.savefig(hist_path, dpi=150)
                             print(f"[hist] Saved histogram subplot → {hist_path}")
 
+                            # Save both logs for maximum compatibility with future fast-path loads
                             hist_df = pd.DataFrame({
                                 "rseed": rseed_list[:len(raw_maes)],
                                 "MAE": raw_maes,
-                                "ln_MAE": ln_maes
+                                "log10_MAE": log10_maes,
+                                "ln_MAE": ln_maes,
                             })
-                            hist_csv = os.path.join(model_dir, f"hist_lnMAE_N{N}_q{qubit}_dataset0.csv")
+                            hist_csv = os.path.join(model_dir, f"hist_logMAE_N{N}_q{qubit}_dataset0.csv")
                             hist_df.to_csv(hist_csv, index=False)
                             print(f"[hist] Saved histogram data → {hist_csv}")
+
 
 
 
