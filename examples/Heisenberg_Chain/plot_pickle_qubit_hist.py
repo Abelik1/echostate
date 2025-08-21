@@ -240,12 +240,12 @@ if __name__ == "__main__":
     # ---------- GENERATION SETTINGS ----------
     DO_GENERATE   = True        # Set False if you only want to combine existing files
     OUTPUT_DIR    = "./true_hist"  # Where to write TrueHist_*.pkl
-    N             = 3
-    QUBITS        = [0, 1]
+    N             = 5
+    QUBITS        = [0, 1, 2, 4]
     OP            = "sz"
     DT            = 0.2
     T             = 100            # total time; steps = int(T/DT)
-    SEEDS         = 3           # how many files
+    SEEDS         = 500       # how many files
     SEED_START    = 314         # first seed
 
     # ---------- COMBINATION SETTINGS ----------
