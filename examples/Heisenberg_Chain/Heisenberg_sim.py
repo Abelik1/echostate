@@ -41,11 +41,11 @@ class HeisenbergChain:
 
     def _build_hamiltonian(self) -> Qobj:
         H = 0
-        for j in range(self.N):
-            jp1 = (j + 1) % self.N
+        for j in range(self.N - 1):        # no wrap to site 0
+            jp1 = j + 1
             for op in (sigmax, sigmay, sigmaz):
-                ops = [qeye(2)] * self.N
-                ops[j] = op()
+                ops = [qeye(2) for _ in range(self.N)]  # avoid list aliasing
+                ops[j]  = op()
                 ops[jp1] = op()
                 H += -0.5 * self.J * tensor(*ops)
         return H
