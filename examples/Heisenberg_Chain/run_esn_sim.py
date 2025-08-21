@@ -518,9 +518,9 @@ if __name__ == '__main__':
     N_list         = [5]
     train_seed     = 3141
     reservoir_seed  = 314
-    pred_seed     = 31415
+    pred_seed     = 314
     qubit_list     = [0,1,2,3,4]       # list of qubit indices
-    qubit_focus = 3
+    qubit_focus = 0
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
@@ -938,9 +938,9 @@ if __name__ == '__main__':
 
         mae_records = []
         config_records = []
-        n_rows = len(N_list)
-        n_cols = len(qubit_list)
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False)
+        n_cols = len(N_list)
+        n_rows = len(qubit_list)
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 5 * n_rows), squeeze=False)
         diagnostic_rows = []
         for row_idx, N in enumerate(N_list):
             truth_series = cache_prediction_truth(
@@ -1083,7 +1083,7 @@ if __name__ == '__main__':
                     print(f"[plot-fallback] All members filtered (tol={PLOT_MAE_TOL}). Showing the last ESN anyway.")
                     all_preds = [pred]  # 'pred' from the last loop iteration
                 # ---------- Plot overlay (dt metrics + high-res visuals) ----------
-                ax = axs[row_idx][col_idx]
+                ax = axs[col_idx][row_idx]
                 all_preds_np = np.stack(all_preds)  # either filtered or unfiltered per the logic above
                 mean_pred = all_preds_np.mean(axis=0)
                 std_pred  = all_preds_np.std(axis=0)
@@ -1128,7 +1128,7 @@ if __name__ == '__main__':
                 for i, ipreds in enumerate(all_preds_np):
                     ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9, label=f"ESN members {i}")
 
-                ax.set_xlim(65, 86)
+                # ax.set_xlim(65, 86)
                 ax.set_title(f"N={N}, Qubit={qubit}")
                 ax.set_xlabel("Time")
                 ax.set_ylabel(f"⟨σ_{predict_op[-1]}⟩")

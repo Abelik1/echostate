@@ -20,7 +20,6 @@ class HeisenbergChain:
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N)).astype(self.dtype)
         vec /= np.linalg.norm(vec)
         self.psi = vec
-
         H_qobj = self._build_hamiltonian()
         self.H = H_qobj
         self.U = (-1j * self.H * self.dt).expm()
@@ -220,7 +219,7 @@ if __name__ == '__main__':
     T = 20
     qubit = 0
     dt_list = [0.1]
-    seed = 31415
+    seed = 314
 
     if True: # Used for standard testing
         all_z = []
