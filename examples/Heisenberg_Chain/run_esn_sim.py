@@ -86,17 +86,13 @@ def load_best_params(param_dir: str, param_name: str, dt: float) -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-def generate_high_res_test(N: int, qubit: int, acc_dt: float, T: float, seed: int):
-    """Build high-res reference ⟨σz⟩ sequence (z_test) and return (z_test, acc_chain)."""
+def generate_high_res_test(N: int, qubit: int, acc_dt: float, T: float, seed: int, measure: str = "sz"):
     np.random.seed(seed)
-    acc_chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt)
-    acc_chain.evolve(int(T / acc_dt), store_reduced=True)
-    raw = acc_chain.get_sz()
-    z_test = np.asarray([
-        float(expect(sigmaz(), Qobj(rho, dims=[[2], [2]])))
-        for rho in raw
-    ])
-    return z_test, acc_chain
+    acc_chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt, measure=measure)
+    # i0 = 21
+    # acc_chain.psi[i0] = np.conj(acc_chain.psi[i0])
+    acc_chain.evolve(int(T / acc_dt))
+    return np.asarray(acc_chain.get_observable()), acc_chain
 
 def z_eval_from_z_test(z_test: np.ndarray, dt: float, acc_dt: float) -> np.ndarray:
     """Downsample z_test to dt (raises if dt not integer multiple of acc_dt), behavior preserved."""
@@ -201,11 +197,6 @@ def load_esn_st(path, config_json, device="cpu"):
     return esn.to(device).eval()
 #region ESNPredictor
 class ESNPredictor:
-    """
-    Orchestrates data generation/caching and provides helpers for training & prediction.
-    Does NOT instantiate an ESN in __init__ (lazy construction only).
-    """
-
     def __init__(self,
                  steps: int,
                  dt: float,
@@ -219,7 +210,9 @@ class ESNPredictor:
                  reservoir_seed: int = None,
                  cache_dir: str = "./examples/Heisenberg_Chain/cache/",
                  learning_algo = "inv",
-                 device: torch.device = torch.device('cpu')):
+                 device: torch.device = torch.device('cpu'),
+                 train_op: str = "sz",
+                 pred_op: str = "sz"):
 
         # Core settings
         self.steps = steps
@@ -231,7 +224,8 @@ class ESNPredictor:
         self.train_batch_size = train_batch_size
         self.device = device
         self.learning_algo = learning_algo
-
+        self.train_op = train_op
+        self.pred_op  = pred_op
         # Seeds
         self.history_seed   = history_seed if history_seed is not None else reservoir_seed
         self.reservoir_seed = reservoir_seed if reservoir_seed is not None else history_seed
@@ -243,16 +237,16 @@ class ESNPredictor:
         self.cache_dir = cache_dir
         fmt_dt_val = str(round(self.dt, 5)).replace(".", "_", 1)
         qubit_tag = f"Qbts(dpth{train_batch_size}){self.N}"
-        self.cache_name = f"Historydata_Seed{self.history_seed}_T{steps*dt}_{qubit_tag}_dt{fmt_dt_val}.pkl"
+        self.cache_name = f"Historydata_Seed{self.history_seed}_T{steps*dt}_{qubit_tag}_op({self.train_op})_dt{fmt_dt_val}.pkl"
         self.cache_path = os.path.join(cache_dir, self.cache_name)
 
         # Histories are built on demand
         self.histories = None
 
-    # ---------- Data ----------
     def prepare_histories(self):
         """
-        Load or generate training histories. Idempotent.
+        Load or generate TRAINING histories (operator = self.train_op) for the training qubit.
+        Returns list of sequences (each sequence is 1D np.array).
         """
         if self.histories is not None:
             return self.histories
@@ -264,16 +258,18 @@ class ESNPredictor:
             if os.path.exists(self.cache_path):
                 with open(self.cache_path, 'rb') as f:
                     self.histories = pickle.load(f)
-                print(f"Loaded {len(self.histories)} training histories from cache.")
+                print(f"Loaded {len(self.histories)} training histories from cache: {self.cache_path}")
             else:
                 for _ in range(self.train_batch_size):
                     chain = HeisenbergChain(num_qubits=self.N,
                                             target_qubit=self.qubit,
-                                            dt=self.dt)
+                                            dt=self.dt,
+                                            measure=self.train_op)
+                    # keep your “conjugate one amplitude” tweak
+                    # i0 = 21 #TODO REMOVE LATER TEST
+                    # chain.psi[i0] = np.conj(chain.psi[i0])
                     chain.evolve(self.steps)
-                    self.histories.append(chain.get_sz())
-                print(f"Collected {len(self.histories)} simulation histories.")
-
+                    self.histories.append(chain.get_observable())
                 os.makedirs(self.cache_dir, exist_ok=True)
                 with open(self.cache_path, 'wb') as f:
                     pickle.dump(self.histories, f)
@@ -301,7 +297,7 @@ class ESNPredictor:
     def make_esn(self, *,
                  reservoir_size=900, spectral_radius=1.0, input_scaling=1.0,
                  ridge_param=1e-3, leak_rate=0.9, sparsity=0.2,
-                 feedback=1, bias_scaling=0.4, seed=None):
+                 feedback=0, bias_scaling=0.4, seed=None):
         """
         Lazily construct an ESN instance with given hyperparams.
         """
@@ -342,6 +338,47 @@ class ESNPredictor:
         true = z_test[self.washout+1: self.washout+1 + len(preds)]
         return preds, true
 
+def _truth_cache_name(base_dir, seed, N, qubit_list, op, dt):
+    qmin, qmax = min(qubit_list), max(qubit_list)
+    fmt_dt = str(round(dt, 5)).replace(".", "_", 1)
+    fname = f"TrueHist_Seed{seed}_N{N}_qubits({qmin}-{qmax})_op({op})_dt{fmt_dt}.pkl"
+    return os.path.join(base_dir, fname)
+
+def cache_prediction_truth(N, qubit_list, dt, T, seed, op, base_dir):
+    """
+    Generate or load true operator time series for all qubits in qubit_list.
+    Returns: dict {qubit_index: np.array length steps+1}
+    """
+    path = _truth_cache_name(base_dir, seed, N, qubit_list, op, dt)
+    steps = int(T / dt)
+
+    if os.path.exists(path):
+        with open(path, 'rb') as f:
+            payload = pickle.load(f)
+        # quick sanity checks
+        if payload.get("N") == N and payload.get("dt") == dt and payload.get("op") == op:
+            print(f"[truth-cache] Loaded {path}")
+            return payload["series"]
+
+    # build (independently per qubit to keep the class simple)
+    print(f"[truth-cache] Generating true series for N={N}, qubits={qubit_list}, op={op}, dt={dt}")
+    
+    series = {}
+    for q in qubit_list:
+        np.random.seed(seed)
+        chain = HeisenbergChain(num_qubits=N, target_qubit=q, dt=dt, measure=op)
+        # keep your i0 tweak consistent for prediction seeds too
+        # i0 = 21
+        # chain.psi[i0] = np.conj(chain.psi[i0])
+        chain.evolve(steps)
+        series[q] = chain.get_observable()
+
+    payload = {"N": N, "dt": dt, "T": T, "op": op, "seed": seed, "qubits": list(qubit_list), "series": series}
+    os.makedirs(base_dir, exist_ok=True)
+    with open(path, 'wb') as f:
+        pickle.dump(payload, f)
+    print(f"[truth-cache] Saved → {path}")
+    return series
 
 
 
@@ -481,19 +518,22 @@ if __name__ == '__main__':
     N_list         = [5]
     train_seed     = 3141
     reservoir_seed  = 314
-    pred_seed     = 314
-    qubit_list     = [0,1,2]       # list of qubit indices
-    qubit_focus = 0
+    pred_seed     = 31415
+    qubit_list     = [0,1,2,3,4]       # list of qubit indices
+    qubit_focus = 3
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
     train_batch_size = 1000 # Number of time series used to train 1 ESN
-    test_esns  = 50 # Number of ESNs trained
+    test_esns  = 1 # Number of ESNs trained
+    
+    train_op = "sz"   # operator for training histories (focus qubit)
+    predict_op = "sz" # operator for truth used in prediction/plots
 
     # Modes: set exactly one of these to True
     do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
-    do_predictions = True
+    do_predictions = False
     official_run   = True   # run ensemble of ESNs & shaded plot
 
     learning_algo = "pinv" # inv / cholesky / solve / eigh / cg / svd / tsvd / qr / pinv
@@ -558,21 +598,9 @@ if __name__ == '__main__':
 
     # 3) Pass step sampling down to ESN (see small ESN change below)
     ESN_STEP_LOG_EVERY = STEP_LOG_EVERY
-
+    train_qubit = qubit_focus if ignore_qubit else qubit
     # ─── Preload high-res reference & (for single/official) test history ───
     from qutip import Qobj, sigmaz, expect
-    np.random.seed(train_seed)
-    acc_chain = HeisenbergChain(num_qubits=N_list[0],
-                            target_qubit=qubit_list[0],
-                            dt=acc_dt)
-    acc_chain.evolve(int(T / acc_dt), store_reduced=True)
-
-    # convert reduced density matrices → scalar ⟨σ_z⟩ values
-    raw = acc_chain.get_sz()
-    z_test = np.asarray([
-        float(expect(sigmaz(), Qobj(rho, dims=[[2], [2]])))
-        for rho in raw
-    ])
 
     # ---------- Mode runners (no behavior changes, just wrapped) ----------
     def run_plot_hyper_mode():
@@ -582,15 +610,12 @@ if __name__ == '__main__':
         for N in N_list:
             train_qubit = qubit_focus if ignore_qubit else qubit_list[0]
             predictor = ESNPredictor(
-                steps=int(T/dt), dt=dt,
-                N=N, qubit=train_qubit,
-                history_values=None,
-                washout=washout,
-                batch_size=train_batch_size,
-                train_batch_size=train_batch_size,
-                history_seed=train_seed,
-                reservoir_seed=reservoir_seed,
-                device=device
+                steps=int(T/dt), dt=dt, N=N, qubit=train_qubit,
+                history_values=None, washout=washout,
+                batch_size=train_batch_size, train_batch_size=train_batch_size,
+                history_seed=train_seed, reservoir_seed=reservoir_seed,
+                device=device,
+                train_op=train_op, pred_op=predict_op   # ← add
             )
 
             fmt_dt = format_dt_val(dt)
@@ -629,6 +654,10 @@ if __name__ == '__main__':
         all_scores = []  # accumulate across all (N, qubit)
 
         for row_idx, N in enumerate(N_list):
+            truth_series = cache_prediction_truth(
+                N=N, qubit_list=qubit_list, dt=dt, T=T, seed=pred_seed,
+                op=predict_op, base_dir=CACHE_DIR
+            )
             for col_idx, qubit in enumerate(qubit_list):
                 print(f"\n[do_predictions] N={N}, qubit={qubit}")
 
@@ -669,7 +698,7 @@ if __name__ == '__main__':
                             ax_hist.hist(log_maes, bins='auto')
                             ax_hist.set_xlabel("log10(MAE)")
                             ax_hist.set_ylabel("Frequency")
-                            ax_hist.set_title(f"MAE dist — N={N}, q={qubit}")
+                            ax_hist.set_title(f"MAE dist — op={predict_op}, N={N}, q={qubit}")
                             if PLOT_MAE_TOL is not None:
                                 ax_hist.axvline(np.log10(PLOT_MAE_TOL + 1e-18), linestyle='--')
 
@@ -686,18 +715,20 @@ if __name__ == '__main__':
                 
                 # Predictor for using the (pretrained) ESN to predict
                 predictor_model = ESNPredictor(
-                    steps=steps,
-                    dt=dt,
-                    N=N,
-                    qubit=qubit,
-                    history_values=None,
-                    washout=washout,
-                    batch_size=train_batch_size,
-                    train_batch_size=train_batch_size,
-                    history_seed=train_seed,        # training dataset seed (not used here for data gen)
-                    reservoir_seed=reservoir_seed,  # ESN reservoir seed base (documentary)
-                    learning_algo=learning_algo,    # <-- match official_run signature
-                    device=device
+                    steps=steps, dt=dt, N=N, qubit=qubit,
+                    history_values=None, washout=washout,
+                    batch_size=train_batch_size, train_batch_size=train_batch_size,
+                    history_seed=train_seed, reservoir_seed=reservoir_seed,
+                    learning_algo=learning_algo, device=device,
+                    train_op=train_op, pred_op=predict_op  # ← add
+                )
+                predictor_pred = ESNPredictor(
+                    steps=steps, dt=dt, N=N, qubit=qubit,
+                    history_values=None, washout=washout,
+                    batch_size=num_pred, train_batch_size=num_pred,
+                    history_seed=pred_seed, reservoir_seed=pred_seed,
+                    learning_algo=learning_algo, device=device,
+                    train_op=predict_op, pred_op=predict_op  # ← key change
                 )
 
                 # Load the ESN named after the TRAIN seed (Ex0 by convention) -- for the per-dataset metrics
@@ -715,15 +746,15 @@ if __name__ == '__main__':
                         "Please run your training/official block first."
                     )
                 # High-res reference (same approach as official_run, per qubit)
-                z_test_hi, _acc_tmp = generate_high_res_test(N, qubit, acc_dt, T, pred_seed)
-                z_eval_hi = z_eval_from_z_test(z_test_hi, dt, acc_dt)
-                # One-shot prediction for plotting (single ESN)
+                z_test_hi, _acc_tmp = generate_high_res_test(N, qubit, acc_dt, T, pred_seed, measure=predict_op)
+                z_eval_dt = truth_series[qubit]  # already at dt, correct operator
                 pred_hi, true_hi = ESNPredictor(
                     steps=int(T/dt), dt=dt, N=N, qubit=qubit, washout=washout,
                     batch_size=train_batch_size, train_batch_size=train_batch_size,
                     history_seed=train_seed, reservoir_seed=reservoir_seed,
-                    learning_algo=learning_algo, device=device
-                ).predict_sequence(esn_single, z_eval_hi)
+                    learning_algo=learning_algo, device=device,
+                    train_op=train_op, pred_op=predict_op
+                ).predict_sequence(esn_single, z_eval_dt)
                 # Generate/load PREDICTION datasets CACHED exactly like training (using pred_seed)
                 predictor_pred = ESNPredictor(
                     steps=steps,
@@ -762,7 +793,7 @@ if __name__ == '__main__':
                     ax.set_xlim(65, 86)
                     ax.set_title(f"N={N}, Qubit={qubit}")
                     ax.set_xlabel("Time")
-                    ax.set_ylabel("⟨σ_z⟩")
+                    ax.set_ylabel(f"⟨σ_{predict_op[-1]}⟩")
                     ax.legend()
 
                 # ── Part A: original do_predictions behavior — per-dataset metrics with a single ESN ──
@@ -808,7 +839,7 @@ if __name__ == '__main__':
                         ax.set_xlim(65, 86)
                         ax.set_title(f"N={N}, Qubit={qubit}")
                         ax.set_xlabel("Time")
-                        ax.set_ylabel("⟨σ_z⟩")
+                        ax.set_ylabel(f"⟨σ_{predict_op[-1]}⟩")
                         ax.legend()
                         first_plot_done = True
 
@@ -871,7 +902,8 @@ if __name__ == '__main__':
                                 if PLOT_MAE_TOL is not None:
                                     ax_hist.axvline(np.log10(PLOT_MAE_TOL + 1e-18), linestyle='--')
 
-                            hist_path = os.path.join(model_dir, f"hist_logMAE_N{N}_q{qubit}_dataset0.png")
+                            hist_path = os.path.join(model_dir, f"hist_logMAE_op{predict_op}_N{N}_q{qubit}_dataset0.png")
+                            hist_csv  = os.path.join(model_dir, f"hist_logMAE_op{predict_op}_N{N}_q{qubit}_dataset0.csv")
                             fig.savefig(hist_path, dpi=150)
                             print(f"[hist] Saved histogram subplot → {hist_path}")
 
@@ -911,6 +943,11 @@ if __name__ == '__main__':
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False)
         diagnostic_rows = []
         for row_idx, N in enumerate(N_list):
+            truth_series = cache_prediction_truth(
+                N=N, qubit_list=qubit_list, dt=dt, T=T, seed=pred_seed,
+                op=predict_op, base_dir=CACHE_DIR
+            )
+
             per_qubit_true = {}
             per_qubit_pred = {}
             for col_idx, qubit in enumerate(qubit_list):
@@ -933,42 +970,44 @@ if __name__ == '__main__':
                     print("No best parameter file found. Using defaults.")
                     logger.warning("Best parameter file not found or invalid. Using defaults.",
                                extra={"extra": {"file": best_param_file_path}})
-                train_qubit = qubit_focus if ignore_qubit else qubit
+                
                 # Predictor only for data orchestration
                 predictor = ESNPredictor(
-                    steps=steps,
-                    dt=dt,
-                    N=N,
-                    qubit=train_qubit,
-                    history_values=None,
-                    washout=washout,
-                    batch_size=train_batch_size,
-                    train_batch_size=train_batch_size,
-                    history_seed=train_seed,
-                    reservoir_seed=reservoir_seed,
-                    learning_algo = learning_algo,
-                    device=device
+                    steps=steps, dt=dt, N=N,
+                    qubit=(qubit_focus if ignore_qubit else qubit),
+                    history_values=None, washout=washout,
+                    batch_size=train_batch_size, train_batch_size=train_batch_size,
+                    history_seed=train_seed, reservoir_seed=reservoir_seed,
+                    learning_algo=learning_algo, device=device,
+                    train_op=train_op, pred_op=predict_op
                 )
 
-                # High-res reference (test) sequence for this (N,qubit)
-                z_test_hi, acc_chain = generate_high_res_test(N, qubit, acc_dt, T, pred_seed)
+                predictor.prepare_histories()
+                # truth at dt for THIS plotted qubit and chosen predict operator
+                z_eval = truth_series[qubit]  # already at dt
+                # optional: high-res overlay (now operator-aware)
+                # high‑res truth for plotting (operator-aware; returns floats already)
+                z_test_hi, acc_chain_hi = generate_high_res_test(N, qubit, acc_dt, T, pred_seed, measure=predict_op)
 
+                # purity requires reduced density matrices; generate a separate rho chain
+                np.random.seed(pred_seed)
+                acc_chain_rho = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt, measure='rho')
+                # i0 = 21
+                # acc_chain_rho.psi[i0] = np.conj(acc_chain_rho.psi[i0])
+                acc_chain_rho.evolve(int(T / acc_dt))
+                rho_seq = acc_chain_rho.get_observable()  # list of 2x2 arrays
+
+                purity = [float(np.real(np.trace(r @ r))) for r in rho_seq]
                 # true-unitary checks for this qubit’s run
                 sim_diag = {
                     "N": N, "qubit": qubit,
-                    "norm_summary": summarize(acc_chain.norm_history),
-                    "energy_summary": summarize(acc_chain.energy_history),
-                    "norm_drift": drift_stats(acc_chain.norm_history),
-                    "energy_drift": drift_stats(acc_chain.energy_history),
+                    "norm_summary": summarize(acc_chain_hi.norm_history),
+                    "energy_summary": summarize(acc_chain_hi.energy_history),
+                    "norm_drift": drift_stats(acc_chain_hi.norm_history),
+                    "energy_drift": drift_stats(acc_chain_hi.energy_history),
                 }
 
-                # single-qubit purity when
-                # single-qubit purity when store_reduced=True
-                rho_seq = acc_chain.get_sz()  # list/array of 2x2
-                purity = []
-                for rho in rho_seq:
-                    # rho is 2x2 complex ndarray
-                    purity.append(float(np.real(np.trace(rho @ rho))))
+            
                 sim_diag["purity_summary"] = summarize(purity)
                 sim_diag["purity_min"] = float(np.min(purity))
                 sim_diag["purity_max"] = float(np.max(purity))
@@ -980,7 +1019,7 @@ if __name__ == '__main__':
                 base_name = base_name_str(learning_algo, train_batch_size, qubit_tag, fmt_dt)
 
                 # Build the dt stream used for ESN evaluation ONCE
-                z_eval = z_eval_from_z_test(z_test_hi, dt, acc_dt)
+                # z_eval = z_eval_from_z_test(z_test_hi, dt, acc_dt)
 
                 for i, rseed in enumerate(seeds):
                     model_path = os.path.join(model_dir, f"trainedmodel_Seed{train_seed}_rSeed{rseed}_{base_name}.pt")
@@ -1017,7 +1056,7 @@ if __name__ == '__main__':
                         "ridge_param": best.get("ridge_param", 1e-1),
                         "leak_rate": best.get("leak_rate", 0.1947),
                         "sparsity": best.get("sparsity", 0.15286),
-                        "feedback": best.get("feedback", 2),
+                        "feedback": best.get("feedback", 0),
                         "bias_scaling": best.get("bias_scaling", 0.277)
                     })
 
@@ -1092,11 +1131,11 @@ if __name__ == '__main__':
                 ax.set_xlim(65, 86)
                 ax.set_title(f"N={N}, Qubit={qubit}")
                 ax.set_xlabel("Time")
-                ax.set_ylabel("⟨σ_z⟩")
+                ax.set_ylabel(f"⟨σ_{predict_op[-1]}⟩")
                 ax.legend()
 
-                fig_path = os.path.join(model_dir, f"overlay_pSeed{pred_seed}_tol{PLOT_MAE_TOL}_{base_name}.pdf")
-                fig.savefig(fig_path)
+                fig_path = os.path.join(model_dir, f"overlay_pSeed{pred_seed}_op{predict_op}_tol{PLOT_MAE_TOL}_{base_name}.pdf")
+                plt.savefig(fig_path)
                 logger.info("Saved overlay plot", extra={"extra": {"fig_path": fig_path}})
 
                 # ---------- (OPTIONAL) Global magnetization ----------
