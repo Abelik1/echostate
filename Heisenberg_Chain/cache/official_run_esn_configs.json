@@ -1,0 +1,16 @@
+[
+    {
+        "N": 5,
+        "qubit": 0,
+        "Ex": 0,
+        "seed": 314,
+        "reservoir_size": 2347,
+        "spectral_radius": 1.56526,
+        "input_scaling": 0.948,
+        "ridge_param": 0.1,
+        "leak_rate": 0.1947,
+        "sparsity": 0.15286,
+        "feedback": 0,
+        "bias_scaling": 0.277
+    }
+]

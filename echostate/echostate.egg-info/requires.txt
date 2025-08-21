@@ -1,0 +1,10 @@
+matplotlib
+numpy
+optuna
+pandas
+pytest
+qutip
+safetensors
+scipy
+setuptools
+torch

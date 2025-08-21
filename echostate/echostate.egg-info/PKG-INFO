@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: echostate
+Version: 0.1
+Summary: Echo State Network implementation using PyTorch
+Author: Alexander Belik
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: optuna
+Requires-Dist: pandas
+Requires-Dist: pytest
+Requires-Dist: qutip
+Requires-Dist: safetensors
+Requires-Dist: scipy
+Requires-Dist: setuptools
+Requires-Dist: torch
+Dynamic: author
+Dynamic: requires-dist
+Dynamic: summary
