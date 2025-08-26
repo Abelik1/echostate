@@ -4,10 +4,10 @@ import pickle
 import numpy as np
 import torch
 from echostate import mean_absolute_error #TODO ADD echostate infront of everything once proper module
-from echostate.logging import setup_logging
+from echostate.esn_logging import setup_logging
 from echostate.tuning import run_optuna_tuning, DefaultSpace  # for tune mode
-from .Heisenberg_sim import HeisenbergChain
-from .heisen_utils import *
+from Heisenberg_sim import HeisenbergChain
+from heisen_utils import *
 import matplotlib.pyplot as plt
 from qutip import Qobj, sigmaz, expect
 import pandas as pd
@@ -22,7 +22,7 @@ warnings.filterwarnings(
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 # device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cpu') if torch.cuda.is_available() else torch.device('cpu')
 
 print(f"Using device: {device}")
 # print(torch.__version__)
@@ -207,9 +207,9 @@ class ESNPredictor:
                  washout: int = 0,
                  batch_size: int = 1,
                  train_batch_size: int = 1,
-                 history_seed: int = None,
+                 history_seed: int = None, 
                  reservoir_seed: int = None,
-                 cache_dir: str = "./examples/Heisenberg_Chain/cache/",
+                 cache_dir: str = "./Heisenberg_Chain/cache/",
                  learning_algo = "inv",
                  device: torch.device = torch.device('cpu'),
                  train_op: str = "sz",
@@ -282,7 +282,7 @@ class ESNPredictor:
         Convert histories into teacher-forced (inputs, targets).
         Returns lists of Tensors of shape (T, 1).
         """
-        self.prepare_histories()
+        self.histories = self.prepare_histories()
         inputs, targets = [], []
         for z_seq in self.histories:
             arr = np.asarray(z_seq)
@@ -454,18 +454,12 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
     # Factory that the tuner will call for each trial
     def build_model(cfg: dict) -> ESN:
         return ESN(
-            device=predictor.device,
-            base_input_dim=1,
-            output_dim=1,
-            washout=washout,
-            learning_algo=learning_algo,
-            seed=seed,
             **cfg
         )
 
     # Mirror your old ranges
     space = DefaultSpace(
-        reservoir_size=(500, 1000),
+        reservoir_size=(100, 100),
         spectral_radius=(0.6, 1.7),
         sparsity=(0.01, 0.1),
         leak_rate=(0.2, 1.0),
@@ -483,7 +477,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
         space=space,
         n_trials=n_trials,
         study_name=study_name,
-        storage=f"sqlite:///{study_dir}/{study_name}.db",
+        storage=None, #f"sqlite:///{study_dir}/{study_name}.db",
         device=predictor.device,
         washout=washout,
         algo=learning_algo,
@@ -491,7 +485,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
     )
 
     # Persist in the same structure you expect elsewhere
-    output_path = f'./examples/Heisenberg_Chain/trained_esns/bestparams_{param_name}.json'
+    output_path = f'./Heisenberg_Chain/saved/bestparams_{param_name}.json'
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     keep = ("reservoir_size","spectral_radius","sparsity","leak_rate","input_scaling","bias_scaling","ridge_param","feedback")
     best_params_dict[str(round(dt, 5))] = {k: best_cfg[k] for k in keep}
@@ -508,27 +502,27 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
 #region CONTROL
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
-    T              = 200
+    T              = 100
     N_list         = [5]
     train_seed     = 3141
     reservoir_seed  = 314
     pred_seed     = 314
     qubit_list     = [0]       # list of qubit indices
     qubit_focus = 0
-    washout        = 150
+    washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
-    train_batch_size = 1000 # Number of time series used to train 1 ESN
+    train_batch_size = 50 # Number of time series used to train 1 ESN
     test_esns  = 1 # Number of ESNs trained
     
     train_op = "sz"   # operator for training histories (focus qubit)
     predict_op = "sz" # operator for truth used in prediction/plots
 
     # Modes: set exactly one of these to True
-    do_tune        = False  # run Optuna tuning
+    do_tune        = True  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     do_predictions = False
-    official_run   = True   # run ensemble of ESNs & shaded plot
+    official_run   = False   # run ensemble of ESNs & shaded plot
 
     learning_algo = "pinv" # inv / cholesky / solve / eigh / cg / svd / tsvd / qr / pinv
 
@@ -545,13 +539,14 @@ if __name__ == '__main__':
     # ---------- Names & Paths (centralized control block) ----------
     # You can change folder names/roots here (loop-dependent names still built later)
     LOG_DIR   = "./logs"
-    MODEL_DIR = "./examples/Heisenberg_Chain/cache/"
-    PARAM_DIR = "./examples/Heisenberg_Chain/trained_esns/"
-    CACHE_DIR = "./examples/Heisenberg_Chain/cache/"  # used by ESNPredictor default
+    MODEL_DIR = "./Heisenberg_Chain/trained_esns/"
+    PARAM_DIR = "./Heisenberg_Chain/saved/"
+    CACHE_DIR = "./Heisenberg_Chain/cache/"  # used by ESNPredictor default
+    FIGURE_DIR = "./Heisenberg_Chain/saved/"
 
     #Logging Settings
     import logging, os
-    from echostate.logging_config import setup_logging
+    from echostate.esn_logging import setup_logging
 
     VERBOSITY = "CRITICAL"          # one of: "INFO", "DEBUG"  (avoid TRACE unless deep dive), "CRITICAL" if none
     STEP_LOG_EVERY = 50           # log ESN step stats every N steps
@@ -639,6 +634,7 @@ if __name__ == '__main__':
 
         model_dir = ensure_dir(MODEL_DIR)
         param_dir = ensure_dir(PARAM_DIR)
+        figure_dir = ensure_dir(FIGURE_DIR)
 
         n_rows = len(N_list)
         n_cols = len(qubit_list)
@@ -849,7 +845,7 @@ if __name__ == '__main__':
 
                 # Print aggregate
                 all_scores.extend(records)
-                maes = df["MAE"].values
+                maes = df["MAE"].to_numpy(dtype=np.float64, copy=False)
                 print(f"(N={N}, q={qubit}) MAE over {num_pred} datasets — "
                       f"mean={np.mean(maes):.4f}, std={np.std(maes):.4f}, "
                       f"min={np.min(maes):.4f}, max={np.max(maes):.4f}")
@@ -897,7 +893,7 @@ if __name__ == '__main__':
                                 if PLOT_MAE_TOL is not None:
                                     ax_hist.axvline(np.log10(PLOT_MAE_TOL + 1e-18), linestyle='--')
 
-                            hist_path = os.path.join(model_dir, f"hist_logMAE_op{predict_op}_N{N}_q{qubit}_dataset0.png")
+                            hist_path = os.path.join(figure_dir, f"hist_logMAE_op{predict_op}_N{N}_q{qubit}_dataset0.png")
                             hist_csv  = os.path.join(model_dir, f"hist_logMAE_op{predict_op}_N{N}_q{qubit}_dataset0.csv")
                             fig.savefig(hist_path, dpi=150)
                             print(f"[hist] Saved histogram subplot → {hist_path}")
@@ -930,6 +926,7 @@ if __name__ == '__main__':
         logger.info("Starting official run")
         model_dir = ensure_dir(MODEL_DIR)
         param_dir = ensure_dir(PARAM_DIR)
+        figure_dir = ensure_dir(FIGURE_DIR)
 
         mae_records = []
         config_records = []
@@ -1130,7 +1127,7 @@ if __name__ == '__main__':
                 ax.set_ylabel(f"⟨σ_{predict_op[-1]}⟩")
                 ax.legend()
 
-                fig_path = os.path.join(model_dir, f"overlay_pSeed{pred_seed}_op{predict_op}_tol{PLOT_MAE_TOL}_{base_name}.pdf")
+                fig_path = os.path.join(figure_dir, f"overlay_pSeed{pred_seed}_op{predict_op}_tol{PLOT_MAE_TOL}_{base_name}.pdf")
                 plt.savefig(fig_path)
                 logger.info("Saved overlay plot", extra={"extra": {"fig_path": fig_path}})
 
@@ -1180,6 +1177,6 @@ if __name__ == '__main__':
     elif official_run:
         run_official_run_mode()
 
-    # render_physics_report("./examples/Heisenberg_Chain/cache/physics_summary.json")
-    # scorecard_physics("./examples/Heisenberg_Chain/cache/physics_summary.json")
+    # render_physics_report("./Heisenberg_Chain/cache/physics_summary.json")
+    # scorecard_physics("./Heisenberg_Chain/cache/physics_summary.json")
     plt.show()

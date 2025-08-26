@@ -2,13 +2,13 @@ from __future__ import annotations
 import math
 from typing import Callable, Sequence
 import torch
-
+import os
 try:
     import optuna
 except Exception as e:
     raise RuntimeError("optuna is required for tuning. Install with `pip install optuna`.") from e
 
-from ..core.metrics import mean_absolute_error, mean_squared_error
+from ..utils import mean_absolute_error, mean_squared_error
 
 def run_optuna_tuning(
     *,
@@ -75,7 +75,12 @@ def run_optuna_tuning(
         preds, metrics = model.predict(list(inputs)[:k], list(targets)[:k])
         # Log-friendly objective (stabilize scale)
         return math.log1p(metrics["mae"])
-
+    
+    if storage and isinstance(storage, str) and storage.startswith("sqlite:///"):
+        db_path = storage[len("sqlite:///"):]
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
     study = optuna.create_study(direction=direction, study_name=study_name, storage=storage, load_if_exists=True)
     study.optimize(objective, n_trials=n_trials, **study_kwargs)
 

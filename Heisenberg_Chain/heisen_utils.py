@@ -303,8 +303,8 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
 
     Thresholds are defaults you can tune to your system’s scale.
     """
-    def _status(ok: bool=None, warn: bool=False):
-        if ok is True:  return "✅"
+    def _status(ok: bool=False, warn: bool=False):
+        if ok:  return "✅"
         if warn:        return "⚠️"
         return "❌"
 
@@ -471,12 +471,69 @@ def scorecard_physics(summary_json: Union[str, Path, Dict, List],
     )
     return cfg
 
+from typing import List, Tuple
+import torch
+
+def rolling_origin_splits(T: int, n_splits: int, min_train: int, horizon: int) -> List[Tuple[slice, slice]]:
+    """
+    Produce rolling-origin (walk-forward) splits over indices [0..T).
+    Returns list of (train_slice, test_slice).
+    """
+    splits = []
+    step = max((T - min_train - horizon) // max(n_splits, 1), 1)
+    start = min_train
+    for k in range(n_splits):
+        train_end = start + k * step
+        test_start = train_end
+        test_end = min(test_start + horizon, T)
+        if test_end <= test_start: break
+        splits.append((slice(0, train_end), slice(test_start, test_end)))
+    return splits
+
+
+import os
+import torch
+from typing import Tuple
+from echostate import ESN
+
+def save_esn(path_prefix: str, model: ESN) -> Tuple[str, str]:
+    """
+    Save an ESN as <prefix>.json (config) and <prefix>.pt (state_dict).
+    """
+    os.makedirs(os.path.dirname(path_prefix) or ".", exist_ok=True)
+    cfg_path = f"{path_prefix}.json"
+    sd_path = f"{path_prefix}.pt"
+
+    cfg = model.get_config()
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    # state_dict contains reservoir buffers (W, W_in, W_bias) and W_out
+    torch.save(model.state_dict(), sd_path)
+    return cfg_path, sd_path
+
+def load_esn(path_prefix: str, map_location: str | torch.device | None = None) -> ESN:
+    """
+    Load ESN from <prefix>.json and <prefix>.pt. If device differs, pass map_location.
+    """
+    cfg_path = f"{path_prefix}.json"
+    sd_path = f"{path_prefix}.pt"
+
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    # Construct on target device (map_location influences buffers on load)
+    model = ESN(**cfg)
+    state = torch.load(sd_path, map_location=map_location or model.device)
+    model.load_state_dict(state, strict=False)  # strict=False tolerates minor version upgrades
+    return model
+
 if __name__ == "__main__":
     from glob import glob
     import re
     import torch
-    from echostate.ESN import *
-    from .run_esn_sim import *
+    from echostate import *
+    from run_esn_sim import *
     def _extract_seeds_from_name(path: str):
         """Parse reservoir seed (rSeedXXX) and global seed (SeedXXX) from filename."""
         fname = path.split("/")[-1].split("\\")[-1]  # works cross-platform
