@@ -170,8 +170,11 @@ def load_esn(path, device="cpu", *, migrate_old=True):
     esn = ESN(**cfg)
 
     # First try to load everything (now that W_out placeholder exists, strict can be True)
-    missing, unexpected = esn.load_state_dict(sd, strict=False)  # keep False to be lenient across versions
 
+    sd_no_wout = dict(sd)
+    if "W_out" in sd_no_wout:
+        del sd_no_wout["W_out"]
+    missing, unexpected = esn.load_state_dict(sd_no_wout, strict=False)  # keep False to be lenient across versions
     # If W_out didn't get loaded (older payloads or name mismatch), install manually
     if ("W_out" in sd) and (not isinstance(esn.W_out, torch.Tensor) or esn.W_out.numel() == 0):
         W = sd["W_out"]
@@ -477,7 +480,7 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
         space=space,
         n_trials=n_trials,
         study_name=study_name,
-        storage=None, #f"sqlite:///{study_dir}/{study_name}.db",
+        storage=f"sqlite:///{study_dir}/{study_name}.db",
         device=predictor.device,
         washout=washout,
         algo=learning_algo,
@@ -507,29 +510,29 @@ if __name__ == '__main__':
     train_seed     = 3141
     reservoir_seed  = 314
     pred_seed     = 314
-    qubit_list     = [0]       # list of qubit indices
+    qubit_list     = [0, 1, 2 ,3]       # list of qubit indices
     qubit_focus = 0
     washout        = 120
     dt             = 0.2
     acc_dt         = 0.05
-    train_batch_size = 50 # Number of time series used to train 1 ESN
+    train_batch_size = 100 # Number of time series used to train 1 ESN
     test_esns  = 1 # Number of ESNs trained
     
     train_op = "sz"   # operator for training histories (focus qubit)
     predict_op = "sz" # operator for truth used in prediction/plots
 
     # Modes: set exactly one of these to True
-    do_tune        = True  # run Optuna tuning
+    do_tune        = False  # run Optuna tuning
     do_plot_hyper  = False  # just plot hyper‐vs‐N
     do_predictions = False
-    official_run   = False   # run ensemble of ESNs & shaded plot
+    official_run   = True  # run ensemble of ESNs & shaded plot
 
     learning_algo = "pinv" # inv / cholesky / solve / eigh / cg / svd / tsvd / qr / pinv
 
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
-    n_trials   = 500
+    n_trials   = 10
     num_pred   = 20 # Number of final test series
     # Plot filtering (set to None to disable filtering)
     PLOT_MAE_TOL = 0.03   # e.g., only plot ESNs with MAE <= 0.002
@@ -984,7 +987,7 @@ if __name__ == '__main__':
 
                 # purity requires reduced density matrices; generate a separate rho chain
                 np.random.seed(pred_seed)
-                acc_chain_rho = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt, measure='rho')
+                acc_chain_rho = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=acc_dt, measure='sz')
                 # i0 = 21
                 # acc_chain_rho.psi[i0] = np.conj(acc_chain_rho.psi[i0])
                 acc_chain_rho.evolve(int(T / acc_dt))

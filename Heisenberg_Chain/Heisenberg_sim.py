@@ -20,7 +20,7 @@ class HeisenbergChain:
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N)).astype(self.dtype)
         vec /= np.linalg.norm(vec)
         self.psi = vec
-        H_qobj = self._build_hamiltonian()
+        H_qobj = self._build_hamiltonian(periodic=False)
         self.H = H_qobj
         self.U = (-1j * self.H * self.dt).expm()
 
@@ -29,22 +29,27 @@ class HeisenbergChain:
         self.obs_history = []  # either list of floats (⟨σ⟩) or 2x2 matrices (ρ)
 
         # prebuild the measurement operator for speed if we're in expectation mode
-        self._pauli_op = None
         if self.measure in ('sx', 'sy', 'sz'):
             pauli = {'sx': sigmax, 'sy': sigmay, 'sz': sigmaz}[self.measure]
             self._pauli_op = tensor(*[pauli() if i == self.k else qeye(2) for i in range(self.N)])
+        else:
+            raise ValueError("Wrong measure")
 
     def set_initial_state(self, vec: np.ndarray):
         if vec.shape != (2**self.N,):
             raise ValueError(f"Input vector shape mismatch: expected {(2**self.N,)}, got {vec.shape}")
         self.psi = vec.astype(self.dtype) / np.linalg.norm(vec)
 
-    def _build_hamiltonian(self) -> Qobj:
-        H = 0
-        for j in range(self.N - 1):        # no wrap to site 0
-            jp1 = j + 1
+    def _build_hamiltonian(self, periodic: bool = False) -> Qobj:
+        H = Qobj(np.zeros((2**self.N, 2**self.N)), dims=[[2]*self.N, [2]*self.N])
+        N = self.N
+        pairs = [(j, j+1) for j in range(N-1)]
+        if periodic:
+            pairs.append((N-1, 0))    # add the wrap only if requested
+
+        for j, jp1 in pairs:
             for op in (sigmax, sigmay, sigmaz):
-                ops = [qeye(2) for _ in range(self.N)]  # avoid list aliasing
+                ops = [qeye(2) for _ in range(N)]
                 ops[j]  = op()
                 ops[jp1] = op()
                 H += -0.5 * self.J * tensor(*ops)
@@ -67,7 +72,7 @@ class HeisenbergChain:
         self._record_observable(psi_qobj)
 
         for _ in range(steps):
-            psi_qobj = self.U * psi_qobj
+            psi_qobj = self.U @ psi_qobj
             self.psi = psi_qobj.full().flatten()
             self.psi /= np.linalg.norm(self.psi)
 
@@ -211,23 +216,28 @@ def print_qubit_marginal_probs(vec: np.ndarray, N: int, k: int, bit_up='0->↑')
     print(f"Qubit {k}:  P(↑)={p_up:.6f},  P(↓)={p_dn:.6f},  P(sum)={p_up+p_dn:.6f}")
 
 
+
+
 if __name__ == '__main__':
     from scipy.interpolate import interp1d
     import pickle
+    import os
+
     # Simulation parameters
     N = 5
     T = 20
     qubit = 0
-    dt_list = [0.1]
+    dt_list = [0.1]  # can add more, e.g., [0.05, 0.1, 0.2]
     seed = 314
 
-    if True: # Used for standard testing
+    if True:  # Used for standard testing
         all_z = []
         all_times = []
         errors = []
 
         # Paths for caching
         base = './examples/Heisenberg_Chain/cache'
+        os.makedirs(base, exist_ok=True)
         histories_path_time = f'{base}/Historydata({seed})_N{N}_alltimes.pkl'
         histories_path_z    = f'{base}/Historydata({seed})_N{N}_allz.pkl'
 
@@ -236,43 +246,38 @@ if __name__ == '__main__':
             with open(histories_path_time, 'rb') as f:
                 all_times = pickle.load(f)
             with open(histories_path_z, 'rb') as f:
-                all_z    = pickle.load(f)
+                all_z = pickle.load(f)
         except FileNotFoundError:
             for dt in dt_list:
                 steps = int(T / dt)
                 print(f"Processing dt={dt}, steps={steps}")
                 np.random.seed(seed)
-                chain = HeisenbergChain(N, qubit, J=1.0, dt=dt)
-                i0 = 21
-                # print(chain.psi[i0])
-                # chain.psi[i0] = np.conj(chain.psi[i0])
-                # print(chain.psi[i0])
+
+                # measure='sz' ensures the chain records ⟨σ_z⟩ for qubit `qubit`
+                chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, J=1.0, dt=dt, measure='sz')
                 chain.evolve(steps)
-                
-                # chain.plot()
-                z_vals = chain.get_sz()
-                # print(z_vals)
+
+                z_vals = chain.get_observable()          # ⟨σ_z⟩(t) for target qubit
                 times = np.arange(len(z_vals)) * dt
                 all_z.append(z_vals)
                 all_times.append(times)
 
             # Cache results
-            import os
-            os.makedirs(base, exist_ok=True)
             with open(histories_path_time, 'wb') as f:
                 pickle.dump(all_times, f)
             with open(histories_path_z, 'wb') as f:
                 pickle.dump(all_z, f)
-        pretty_print_state(chain.psi, N, top_k=20, tol=0.0, msb_is_q0=True, bit_up='0->↑', phase_in_deg=True)
 
-        # Also show the single-qubit marginal for the measured qubit (and maybe another)
+        # Pretty-print final state and single-qubit marginals
+        pretty_print_state(chain.psi, N, top_k=20, tol=0.0, msb_is_q0=True, bit_up='0->↑', phase_in_deg=True)
         print_qubit_marginal_probs(chain.psi, N, k=qubit, bit_up='0->↑')
         print_qubit_marginal_probs(chain.psi, N, k=1, bit_up='0->↑')
-        # Reference trajectory
+
+        # Reference trajectory for error comparison (first dt in list)
         ref_z = all_z[0]
         ref_t = all_times[0]
 
-        # Compute mean absolute errors
+        # Compute mean absolute errors vs the first trajectory
         for i, (t_arr, z_arr) in enumerate(zip(all_times, all_z)):
             if i == 0:
                 errors.append(0.0)
@@ -280,7 +285,7 @@ if __name__ == '__main__':
             f_interp = interp1d(t_arr, z_arr, bounds_error=False, fill_value="extrapolate")
             errors.append(np.mean(np.abs(f_interp(ref_t) - ref_z)))
 
-        # # Plot error vs dt
+        # Plot error vs dt (useful when dt_list has multiple values)
         plt.figure()
         plt.plot(dt_list, errors, marker='o')
         plt.xlabel('dt')
@@ -289,13 +294,13 @@ if __name__ == '__main__':
         plt.grid(True)
         plt.tight_layout()
 
-        # Compare two trajectories visually
+        # Compare one trajectory visually
         plt.figure()
         plt.plot(all_times[0], all_z[0], label=f"dt={dt_list[0]}")
-        # plt.plot(all_times[1], all_z[1], label=f"dt={dt_list[1]}")
         plt.xlabel('Time')
         plt.ylabel(f"⟨σ_z⟩ (qubit {qubit})")
         plt.legend()
+        plt.tight_layout()
         plt.show()
 
     if False:  # Used for perturbed testing
@@ -308,19 +313,17 @@ if __name__ == '__main__':
         # Generate initial states
         base_vec, pert1, pert2 = generate_perturbed_states(N, base_seed=31415, epsilon=1e-2)
 
-        # Initialize chains
+        # Initialize chains with the different initial states
         chains = []
         for psi in [base_vec, pert1, pert2]:
-            chain = HeisenbergChain(N, qubit, dt=dt)
+            chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, dt=dt, measure='sz')
             chain.set_initial_state(psi)
             chain.evolve(steps)
             chains.append(chain)
 
         # Compare ⟨σ_z⟩ values
-        zs = [chain.get_sz() for chain in chains]
+        zs = [c.get_observable() for c in chains]
         times = np.arange(len(zs[0])) * dt
-
-        import matplotlib.pyplot as plt
 
         plt.figure(figsize=(10, 5))
         labels = ['Original', 'Perturbed Qubit 0', 'Perturbed All Qubits']
@@ -332,9 +335,15 @@ if __name__ == '__main__':
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
-        plt.xlim(500,600)
+        plt.xlim(500, 600)
+
         mae_01 = np.mean(np.abs(zs[0] - zs[1]))
         mae_02 = np.mean(np.abs(zs[0] - zs[2]))
         print(f"MAE (Original vs Perturbed Qubit 0): {mae_01:.6e}")
         print(f"MAE (Original vs Perturbed All):     {mae_02:.6e}")
         plt.show()
+      
+        
+        
+        
+        

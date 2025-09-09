@@ -9,7 +9,8 @@ except Exception as e:
     raise RuntimeError("optuna is required for tuning. Install with `pip install optuna`.") from e
 
 from ..utils import mean_absolute_error, mean_squared_error
-
+optuna.logging.set_verbosity(optuna.logging.DEBUG)
+optuna.logging.enable_default_handler()  
 def run_optuna_tuning(
     *,
     build_model: Callable[[dict], torch.nn.Module],
@@ -58,6 +59,7 @@ def run_optuna_tuning(
         return cfg
 
     def objective(trial):
+        print(f"[optuna] starting trial {trial.number}")
         cfg = suggest(trial)
         # Base dims taken from data
         cfg.update({
@@ -68,13 +70,28 @@ def run_optuna_tuning(
             "seed": seed,
             "device": device,
         })
-        model = build_model(cfg)
-        model.fit(X_tensor, Y_tensor)
+        try:
+            model = build_model(cfg)
+        except Exception as e:
+            print(f"[optuna] build_model failed: {e!r}")
+            raise
+
+        try:
+            model.fit(X_tensor, Y_tensor)
+        except Exception as e:
+            print(f"[optuna] model.fit failed: {e!r}")
+            raise
 
         k = eval_subset or len(inputs)
-        preds, metrics = model.predict(list(inputs)[:k], list(targets)[:k])
+        try:
+            preds, metrics = model.predict(list(inputs)[:k], list(targets)[:k])
+        except Exception as e:
+            print(f"[optuna] model.predict failed: {e!r}")
+            raise
+
+        print(f"[optuna] trial {trial.number} finished, mae={metrics.get('mae')}")
         # Log-friendly objective (stabilize scale)
-        return math.log1p(metrics["mae"])
+        return math.log1p(metrics["mse"])
     
     if storage and isinstance(storage, str) and storage.startswith("sqlite:///"):
         db_path = storage[len("sqlite:///"):]

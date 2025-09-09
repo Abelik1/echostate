@@ -48,7 +48,7 @@ class ESN(torch.nn.Module):
         profile: bool = False,
     ):
         super().__init__()
-        self.device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+        self.device = device
         if seed is not None:
             torch.manual_seed(seed)
 

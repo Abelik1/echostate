@@ -1,6 +1,7 @@
 import logging
 import torch
 import torch.nn as nn
+from torch.cuda.amp import autocast
 from ..utils import compute_spectral_radius
 
 LOGGER = logging.getLogger(__name__)
@@ -94,10 +95,10 @@ class Reservoir(nn.Module):
 
         if x.dim() == 1: x = x.unsqueeze(0)
         if u.dim() == 1: u = u.unsqueeze(0)
-
         if self.use_amp and x.is_cuda:
-            with torch.amp.autocast("cuda", dtype=torch.float16):
+            with autocast("cuda", dtype=torch.float16):
                 pre = torch.addmm(u @ self.W_in.T + self.bias_vec, x, self.W.mT)
+                x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
                 x_new = (1 - leak_rate) * x + leak_rate * torch.tanh(pre)
         else:
             pre = torch.addmm(u @ self.W_in.T + self.bias_vec, x, self.W.mT)
