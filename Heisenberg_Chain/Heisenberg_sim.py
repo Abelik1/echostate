@@ -20,7 +20,7 @@ class HeisenbergChain:
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N)).astype(self.dtype)
         vec /= np.linalg.norm(vec)
         self.psi = vec
-        H_qobj = self._build_hamiltonian(periodic=False)
+        H_qobj = self._build_hamiltonian(periodic=True)
         self.H = H_qobj
         self.U = (-1j * self.H * self.dt).expm()
 

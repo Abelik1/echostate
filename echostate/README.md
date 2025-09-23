@@ -421,3 +421,14 @@ For cg, set sensible defaults (e.g., rtol=1e-6, maxiter=1000–5000) and log res
 For extra safety, add a small jitter to A before factorizations: A = A + 1e-12 * I (scale by A.norm() if needed).
 
 If you compute multiple outputs, all solvers above handle multiple RHS (xTy has shape (R+1, d_out)), so they’re vectorized.
+
+
+TODO
+Get all the graphs we have ever needed.
+So we have the graph with histograms and fourier analysis
+One plot of 1 esn at tuned values on trained values
+ont plot of 1 esn at tuned values on non trianed values
+^Train this on variation of Large times steps, lots of batches.
+
+Then make plots with a lot of trained esns, without tolerance
+MAke plots with a lot of trained esns with tolerance
