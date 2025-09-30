@@ -1,6 +1,6 @@
 /venv
-/Heisenberg_Chain/cache
-__pycache__/
+/Heisenberg_Chain/cache/
+**/__pycache__/
 /echostate/__pycache__
 /logs
 /echostate.egg-info

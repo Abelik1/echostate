@@ -8,7 +8,7 @@ class HeisenbergChain:
     You can record either a Pauli expectation ('sx','sy','sz') for a target qubit
     or the reduced density matrix ('rho') for that qubit.
     """
-    def __init__(self, num_qubits, target_qubit, J=1.0, dt=0.01,
+    def __init__(self, periodic, num_qubits, target_qubit, J=1.0, dt=0.01,
                  dtype=np.complex64, measure='sz'):
         self.N = num_qubits
         self.k = target_qubit
@@ -20,7 +20,7 @@ class HeisenbergChain:
         vec = (np.random.randn(2**self.N) + 1j*np.random.randn(2**self.N)).astype(self.dtype)
         vec /= np.linalg.norm(vec)
         self.psi = vec
-        H_qobj = self._build_hamiltonian(periodic=True)
+        H_qobj = self._build_hamiltonian(periodic=periodic)
         self.H = H_qobj
         self.U = (-1j * self.H * self.dt).expm()
 
