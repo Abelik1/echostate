@@ -216,8 +216,6 @@ def print_qubit_marginal_probs(vec: np.ndarray, N: int, k: int, bit_up='0->↑')
     print(f"Qubit {k}:  P(↑)={p_up:.6f},  P(↓)={p_dn:.6f},  P(sum)={p_up+p_dn:.6f}")
 
 
-
-
 if __name__ == '__main__':
     from scipy.interpolate import interp1d
     import pickle
@@ -229,7 +227,7 @@ if __name__ == '__main__':
     qubit = 0
     dt_list = [0.1]  # can add more, e.g., [0.05, 0.1, 0.2]
     seed = 314
-
+    periodic = False
     if True:  # Used for standard testing
         all_z = []
         all_times = []
@@ -254,7 +252,7 @@ if __name__ == '__main__':
                 np.random.seed(seed)
 
                 # measure='sz' ensures the chain records ⟨σ_z⟩ for qubit `qubit`
-                chain = HeisenbergChain(num_qubits=N, target_qubit=qubit, J=1.0, dt=dt, measure='sz')
+                chain = HeisenbergChain(periodic = periodic, num_qubits=N, target_qubit=qubit, J=1.0, dt=dt, measure='sz')
                 chain.evolve(steps)
 
                 z_vals = chain.get_observable()          # ⟨σ_z⟩(t) for target qubit
