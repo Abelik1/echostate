@@ -459,13 +459,13 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
             n_trials=n_trials, direction="minimize",
             study_name=study_name, study_loc=study_loc,
             washout=washout, seed=seed,
-            reservoir_limit= [500,1000],
-            spectral_radius_limit=[0.6,1.7],
+            reservoir_limit= [200,1000],
+            spectral_radius_limit=[0.3,1.7],
             feedback_limit=0,
-            input_scaling_limit=[0.1, 0.3],
+            input_scaling_limit=[0.05, 0.3],
             ridge_param_limit=[1e-11, 1e-3],
             leak_rate_limit=[ 0.2, 1.0],
-            sparsity_limit= [0.01,0.1],
+            sparsity_limit= [0.01,0.4],
             bias_scaling_limit= 0.0,
             device=predictor.device,
             learning_algo= learning_algo
@@ -515,17 +515,17 @@ def Heisen_tune(predictor, study_name, study_loc, washout, seed, n_trials, param
 if __name__ == '__main__':
     # ─── Configuration ──────────────────────────────────────────────────────
     T              = 100
-    N_list         = [5]
+    N_list         = [3,4]
     train_seed     = 3141
     reservoir_seed  = 314
-    pred_seed     = 314
-    qubit_list     = [0,1,2,3,4]       # list of qubit indices
+    pred_seed     = 31415
+    qubit_list     = [0,1]       # list of qubit indices
     qubit_focus = 0
-    washout        = 120
+    washout        = 100
     dt             = 0.2
     acc_dt         = 0.05
     train_batch_size = 1000 # Number of time series used to train 1 ESN
-    test_esns  = 1 # Number of ESNs trained
+    test_esns  = 50 # Number of ESNs trained
     
     train_op = "sz"   # operator for training histories (focus qubit)
     predict_op = "sz" # operator for truth used in prediction/plots
@@ -541,12 +541,12 @@ if __name__ == '__main__':
     ignore_qubit = True
     ignore_washout = True # Applies only to hyperparameters so far
     # optuna params (only used if do_tune)
-    n_trials   = 500
-    num_pred   = 20 # Number of final test series
+    n_trials   = 100
+    num_pred   = 50 # Number of final test series
     # Plot filtering (set to None to disable filtering)
-    PLOT_MAE_TOL = 0.03   # e.g., only plot ESNs with MAE <= 0.002
+    PLOT_MAE_TOL = 0.005   # e.g., only plot ESNs with MAE <= 0.002
     USE_TOL_FOR_STATS = True # if True, mean/std shading uses only filtered ESNs
-    SKIP_PREDICTIONS_IF_HIST = True 
+    SKIP_PREDICTIONS_IF_HIST = False
     
     # ---------- Names & Paths (centralized control block) ----------
     # You can change folder names/roots here (loop-dependent names still built later)
@@ -1126,16 +1126,37 @@ if __name__ == '__main__':
 
                 # label ensemble members only once to avoid legend spam
                 for i, ipreds in enumerate(all_preds_np):
-                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9, label=f"ESN members {i}")
+                    ax.plot(t_dt, ipreds[:len(t_dt)], alpha=0.5, lw=0.9) #, label=f"ESN members {i}""
 
-                # ax.set_xlim(65, 86)
+                ax.set_xlim(40, 81)
                 ax.set_title(f"N={N}, Qubit={qubit}")
                 ax.set_xlabel("Time")
                 ax.set_ylabel(f"⟨σ_{predict_op[-1]}⟩")
                 ax.legend()
 
                 fig_path = os.path.join(model_dir, f"overlay_pSeed{pred_seed}_op{predict_op}_tol{PLOT_MAE_TOL}_{base_name}.pdf")
-                plt.savefig(fig_path)
+                # Build metadata dict for PDF
+                pdf_metadata = {
+                    "Title": f"ESN Simulation Results (N={N}, qubit={qubit})",
+                    "Author": "physics_echostate pipeline",
+                    "Subject": "Heisenberg Chain ESN Simulation",
+                    "Keywords": json.dumps({
+                        "N": N,
+                        "qubit": qubit,
+                        "dt": dt,
+                        "acc_dt": acc_dt,
+                        "learning_algo": learning_algo,
+                        "washout": washout,
+                        "train_batch_size": train_batch_size,
+                        "reservoir_seed": reservoir_seed,
+                        "train_seed": train_seed,
+                        "hyperparameters": best  # the ESN params you loaded
+                    })
+                }
+
+                # Save with metadata
+                plt.savefig(fig_path, metadata=pdf_metadata)
+                
                 logger.info("Saved overlay plot", extra={"extra": {"fig_path": fig_path}})
 
                 # ---------- (OPTIONAL) Global magnetization ----------
