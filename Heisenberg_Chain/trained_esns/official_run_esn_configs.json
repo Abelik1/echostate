@@ -1,0 +1,58 @@
+[
+    {
+        "N": 5,
+        "qubit": 0,
+        "Ex": 0,
+        "seed": 314,
+        "reservoir_size": 100,
+        "spectral_radius": 1.0833793147853996,
+        "input_scaling": 0.23904161214415107,
+        "ridge_param": 2.5962215981848812e-08,
+        "leak_rate": 0.2894298566737458,
+        "sparsity": 0.0318357932255443,
+        "feedback": 0,
+        "bias_scaling": 0.0
+    },
+    {
+        "N": 5,
+        "qubit": 1,
+        "Ex": 0,
+        "seed": 314,
+        "reservoir_size": 100,
+        "spectral_radius": 1.0833793147853996,
+        "input_scaling": 0.23904161214415107,
+        "ridge_param": 2.5962215981848812e-08,
+        "leak_rate": 0.2894298566737458,
+        "sparsity": 0.0318357932255443,
+        "feedback": 0,
+        "bias_scaling": 0.0
+    },
+    {
+        "N": 5,
+        "qubit": 2,
+        "Ex": 0,
+        "seed": 314,
+        "reservoir_size": 100,
+        "spectral_radius": 1.0833793147853996,
+        "input_scaling": 0.23904161214415107,
+        "ridge_param": 2.5962215981848812e-08,
+        "leak_rate": 0.2894298566737458,
+        "sparsity": 0.0318357932255443,
+        "feedback": 0,
+        "bias_scaling": 0.0
+    },
+    {
+        "N": 5,
+        "qubit": 3,
+        "Ex": 0,
+        "seed": 314,
+        "reservoir_size": 100,
+        "spectral_radius": 1.0833793147853996,
+        "input_scaling": 0.23904161214415107,
+        "ridge_param": 2.5962215981848812e-08,
+        "leak_rate": 0.2894298566737458,
+        "sparsity": 0.0318357932255443,
+        "feedback": 0,
+        "bias_scaling": 0.0
+    }
+]
