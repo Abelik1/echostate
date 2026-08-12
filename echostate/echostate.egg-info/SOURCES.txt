@@ -10,9 +10,9 @@ echostate.egg-info/SOURCES.txt
 echostate.egg-info/dependency_links.txt
 echostate.egg-info/requires.txt
 echostate.egg-info/top_level.txt
-logging/__init__.py
-logging/config.py
-logging/utils.py
+esn_logging/__init__.py
+esn_logging/config.py
+esn_logging/utils.py
 tests/__init__.py
 tests/test_esn.py
 tests/test_reservoir.py

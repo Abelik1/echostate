@@ -6,7 +6,7 @@ import torch
 from .reservoir import Reservoir
 from .trainer import Trainer
 from .metrics import mean_absolute_error, mean_squared_error
-from ..logging.utils import log_tensor, tensor_stats
+from ..esn_logging.utils import log_tensor, tensor_stats
 
 LOGGER = logging.getLogger(__name__)
 

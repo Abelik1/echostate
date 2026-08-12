@@ -1,4 +1,4 @@
 core
-logging
+esn_logging
 tests
 tuning

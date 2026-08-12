@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import torch
 from echostate import mean_absolute_error #TODO ADD echostate infront of everything once proper module
-from echostate.logging import setup_logging
+from echostate.esn_logging import setup_logging
 from echostate.tuning import run_optuna_tuning, DefaultSpace  # for tune mode
 from .Heisenberg_sim import HeisenbergChain
 from .heisen_utils import *
